@@ -65,6 +65,9 @@ func (c *SecureClient) Get(ctx context.Context, u *url.URL, header http.Header) 
 		return Reply{}, contracts.Fail("INVALID_ARGUMENT", "Invalid request")
 	}
 	req.Header = header.Clone()
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
 	req.Header.Set("User-Agent", "SJTU-Bridge/0.2")
 	res, err := c.client.Do(req)
 	if err != nil {

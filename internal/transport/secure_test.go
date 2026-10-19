@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,28 @@ import (
 	"strings"
 	"testing"
 )
+
+type publicRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f publicRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAnonymousSecureRequestWithNilHeaders(t *testing.T) {
+	c := NewSecure("www.sjtu.edu.cn", func(u *url.URL) bool { return ExactHTTPS(u, "www.sjtu.edu.cn") && u.Path == "/jgsz/index.html" })
+	defer c.Close()
+	calls := 0
+	c.client.Transport = publicRoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != "GET" || r.Header.Get("User-Agent") == "" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+			t.Fatal("invalid anonymous request", r.Header)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/html"}}, Body: io.NopCloser(strings.NewReader("<html>public</html>"))}, nil
+	})
+	u, _ := url.Parse("https://www.sjtu.edu.cn/jgsz/index.html")
+	reply, err := c.Get(context.Background(), u, nil)
+	if err != nil || reply.Status != 200 || calls != 1 {
+		t.Fatal(reply, err)
+	}
+}
 
 func TestSecureRequestRejectsDestinationBeforeCredentialSend(t *testing.T) {
 	c := NewSecure("oc.sjtu.edu.cn", func(u *url.URL) bool {
