@@ -21,12 +21,14 @@ type ListInput struct {
 }
 
 type Item struct {
-	Provider      string  `json:"provider"`
-	AccountRef    string  `json:"account_ref,omitempty"`
-	SourceID      string  `json:"source_id"`
-	Title         string  `json:"title"`
-	URL           string  `json:"url"`
-	PublishedDate *string `json:"published_date"`
+	Provider      string        `json:"provider"`
+	AccountRef    string        `json:"account_ref,omitempty"`
+	SourceID      string        `json:"source_id"`
+	Title         string        `json:"title"`
+	URL           string        `json:"url"`
+	PublishedDate *string       `json:"published_date"`
+	Navigation    *Navigation   `json:"navigation,omitempty"`
+	Fields        []PublicField `json:"fields,omitempty"`
 }
 
 // SessionCheck deliberately contains no identity, token, Cookie or SSO URL.
@@ -75,6 +77,9 @@ type Capability struct {
 	Title           string          `json:"title"`
 	Category        string          `json:"category"`
 	CategoryLabel   string          `json:"category_label"`
+	TaskGroup       string          `json:"task_group"`
+	TaskGroupLabel  string          `json:"task_group_label"`
+	CrossListings   []TaskPath      `json:"cross_listings"`
 	Service         string          `json:"service"`
 	Aliases         []string        `json:"aliases"`
 	Keywords        []string        `json:"keywords"`
@@ -83,6 +88,9 @@ type Capability struct {
 	Description     string          `json:"description"`
 	DataClass       string          `json:"data_class"`
 	Effects         []string        `json:"effects"`
+	Operation       Operation       `json:"operation"`
+	Delivery        Delivery        `json:"delivery"`
+	Credentials     []string        `json:"credentials"`
 	Provider        string          `json:"provider"`
 	Authorized      bool            `json:"authorized"`
 	InputSchema     json.RawMessage `json:"input_schema,omitempty"`

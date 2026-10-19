@@ -51,6 +51,13 @@ func capabilityTool(capability contracts.Capability) *sdk.Tool {
 	if capability.Service != "" {
 		description = append(description, "服务："+capability.Service)
 	}
+	description = append(description, "任务组："+capability.TaskGroupLabel+" ("+capability.TaskGroup+")", "Bridge 操作："+string(capability.Operation)+"；交付："+string(capability.Delivery))
+	if capability.Delivery == contracts.NavigationDelivery {
+		description = append(description, "此工具定位官方目的地；不是数据查询。相关可调用能力、任务归属、入口依据和未接入原因见 navigation；本次不探测链接，不复制操作教程。")
+	}
+	for _, path := range capability.CrossListings {
+		description = append(description, "交叉入口："+path.Category+"/"+path.TaskGroup)
+	}
 	if len(capability.Aliases) > 0 {
 		description = append(description, "任务别名："+strings.Join(capability.Aliases, "、"))
 	}
@@ -61,7 +68,7 @@ func capabilityTool(capability contracts.Capability) *sdk.Tool {
 		Name: strings.ReplaceAll(capability.ID, ".", "_"), Title: capability.Title,
 		Description: strings.Join(description, "\n"),
 		InputSchema: capability.InputSchema, OutputSchema: capability.OutputSchema,
-		Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: &sdk.ToolAnnotations{ReadOnlyHint: capability.IsReadOnly(), IdempotentHint: capability.IsReadOnly()},
 	}
 }
 

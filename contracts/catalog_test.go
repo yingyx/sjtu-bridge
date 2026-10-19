@@ -80,4 +80,50 @@ func TestCatalogSummaryAndDetailIsolation(t *testing.T) {
 	if PublicCapabilities()[0].Aliases[0] == "changed" {
 		t.Fatal("static catalog mutated")
 	}
+	cross := AssignmentCapability("canvas:user:7", []string{"canvas:course:1"}, "deadlines_v1", 10)
+	copy := CloneCapability(cross)
+	copy.Credentials[0] = "changed"
+	if cross.Credentials[0] != "CanvasToken" {
+		t.Fatal("credential requirement metadata mutable")
+	}
+}
+
+func TestCrossListingsMatchOnePathWithoutDuplicatingCapability(t *testing.T) {
+	caps := PublicCapabilities()
+	for i := range caps {
+		caps[i].Authorized = true
+	}
+	for _, test := range []struct {
+		category, group string
+		count           int
+	}{
+		{"development", "activities", 3}, {"learning", "practice", 3},
+		{"development", "practice", 0}, {"科研与实验", "科研计算与数据", 2},
+		{"library", "resources", 1},
+	} {
+		got, err := FilterCapabilities(caps, CapabilityFilter{Category: test.category, TaskGroup: test.group})
+		if err != nil || len(got) != test.count {
+			t.Fatalf("%+v: %v %v", test, got, err)
+		}
+		seen := map[string]bool{}
+		for _, c := range got {
+			if seen[c.ID] {
+				t.Fatal("duplicate capability")
+			}
+			seen[c.ID] = true
+		}
+	}
+	for _, c := range caps {
+		if c.Delivery == NavigationDelivery && len(c.CrossListings) > 0 {
+			copy := CloneCapability(c)
+			copy.CrossListings[0].Category = "changed"
+			if c.CrossListings[0].Category == "changed" {
+				t.Fatal("cross listing mutated")
+			}
+			break
+		}
+	}
+	if _, err := FilterCapabilities(caps, CapabilityFilter{TaskGroup: string([]byte{0xff})}); err == nil {
+		t.Fatal("invalid UTF-8 task group")
+	}
 }

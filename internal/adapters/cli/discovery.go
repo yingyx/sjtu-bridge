@@ -60,12 +60,13 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 				return nil
 			}
 			for _, c := range caps {
-				fmt.Fprintf(out, "%s\t%s\n  %s (%s) / %s\n  %s\n", c.ID, c.Title, c.CategoryLabel, c.Category, c.Service, c.Description)
+				fmt.Fprintf(out, "%s\t%s\n  %s (%s) / %s / %s\n  %s; %s\n  %s\n", c.ID, c.Title, c.CategoryLabel, c.Category, c.TaskGroupLabel, c.Service, c.Operation, c.Delivery, c.Description)
 			}
 			fmt.Fprintln(out, "使用 sjtu capabilities describe ID 查看完整参数和返回字段。")
 			return nil
 		}}
 		command.Flags().StringVar(&filter.Category, "category", "", "业务分类 ID 或中文名称，如 learning / 学习与教学")
+		command.Flags().StringVar(&filter.TaskGroup, "task-group", "", "任务组 ID 或中文名称，如 practice / 实践修业与达标；包含显式交叉入口")
 		command.Flags().StringVar(&filter.Service, "service", "", "服务名称，如 Canvas / 教务处")
 		if verb == "search" {
 			command.Example = "  sjtu capabilities search 校历\n  sjtu capabilities search \"作业 截止时间\" --connection ABSOLUTE_PATH --json"

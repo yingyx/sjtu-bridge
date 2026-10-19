@@ -55,7 +55,7 @@ func TestEntrypointParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 3 {
+	if len(tools.Tools) != len(api.Capabilities()) {
 		t.Fatal(tools)
 	}
 	for _, tool := range tools.Tools {

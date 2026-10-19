@@ -60,7 +60,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	}
 	addDiscovery(root, out, &profile, &connection, &jsonOutput)
 	root.AddCommand(&cobra.Command{Use: "doctor", GroupID: "runtime", Short: "离线实现状态与诊断（不探测校园网站）", Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
-		return writeJSON(out, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "canvas": "broker_assignments_unverified_live", "jaccount": "diagnostic_only_persistence_not_ready", "teaching": "not_ready"}, "capabilities": len(api.Capabilities())})
+		return writeJSON(out, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_unverified_live", "jaccount": "diagnostic_only_persistence_not_ready", "teaching": "not_ready"}, "capabilities": len(api.Capabilities())})
 	})})
 	registry, err := bridge.New(bridge.Options{})
 	if err != nil {
@@ -68,16 +68,21 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	}
 	defer registry.Close()
 	groups := map[string]*cobra.Command{}
+	resources := map[string]*cobra.Command{}
 	for _, c := range registry.Capabilities() {
 		parts := strings.Split(c.ID, ".")
 		group := groups[parts[0]]
 		if group == nil {
-			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: "公开校园资讯与网站导航"}
+			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: c.CategoryLabel + "公开查询与服务导航"}
 			groups[parts[0]] = group
 			root.AddCommand(group)
 		}
-		resource := &cobra.Command{Use: parts[1]}
-		group.AddCommand(resource)
+		resource := resources[parts[0]+"."+parts[1]]
+		if resource == nil {
+			resource = &cobra.Command{Use: parts[1]}
+			resources[parts[0]+"."+parts[1]] = resource
+			group.AddCommand(resource)
+		}
 		var limit int
 		var cursor, inputFile string
 		var stdinJSON bool
@@ -143,6 +148,22 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 					date = *item.PublishedDate
 				}
 				fmt.Fprintf(out, "%s\t%s\n  %s\n", date, item.Title, item.URL)
+				for _, field := range item.Fields {
+					fmt.Fprintf(out, "  %s：%s\n", field.Label, field.Value)
+				}
+				if n := item.Navigation; n != nil {
+					fmt.Fprintf(out, "  用途：%s\n  主归属：%s/%s\n  目的地：%s\n  官方后续操作：%s / %s\n  未接入原因：%s (%s)\n  官网认证：%s\n", n.Purpose, n.Primary.Category, n.Primary.TaskGroup, n.DestinationKind, n.Upstream.Status, n.Upstream.Operation, n.Upstream.Reason, n.Upstream.ReasonCode, n.Upstream.Authentication)
+					for _, path := range n.CrossListings {
+						fmt.Fprintf(out, "  交叉入口：%s/%s\n", path.Category, path.TaskGroup)
+					}
+					for _, id := range n.RelatedCapabilities {
+						fmt.Fprintln(out, "  相关能力："+id)
+					}
+					for _, source := range n.Sources {
+						fmt.Fprintf(out, "  入口依据：%s %s\n", source.Title, source.URL)
+					}
+					fmt.Fprintf(out, "  依据核对：%s；本次链接探测：%t\n", n.VerifiedAt, n.LinkCheckedThisCall)
+				}
 			}
 			for _, warning := range response.Warnings {
 				fmt.Fprintln(diagnostics, warning.Code+": "+warning.Message)

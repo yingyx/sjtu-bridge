@@ -77,7 +77,7 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 		}
 		d.Capability.InputSchema = inJSON
 		d.Capability.OutputSchema = outJSON
-		d.Capability.Effects = append([]string(nil), d.Capability.Effects...)
+		d.Capability = contracts.CloneCapability(d.Capability)
 		e.definitions[d.Capability.ID] = d
 	}
 	return e, nil
@@ -86,14 +86,9 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 func (e *Engine) Capabilities() []contracts.Capability {
 	result := make([]contracts.Capability, 0, len(e.definitions))
 	for _, d := range e.definitions {
-		c := d.Capability
+		c := contracts.CloneCapability(d.Capability)
 		account := ""
 		c.Authorized = e.allowed(c, account)
-		c.Aliases = append([]string(nil), c.Aliases...)
-		c.Keywords = append([]string(nil), c.Keywords...)
-		c.Effects = append([]string(nil), c.Effects...)
-		c.InputSchema = append(json.RawMessage(nil), c.InputSchema...)
-		c.OutputSchema = append(json.RawMessage(nil), c.OutputSchema...)
 		result = append(result, c)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

@@ -76,7 +76,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	defer c.Close()
 	caps, e := c.Capabilities(ctx)
-	if e != nil || len(caps) != 4 {
+	if e != nil || len(caps) != len(contracts.PublicCapabilities())+1 {
 		t.Fatal("SDK unified discovery", e, len(caps))
 	}
 	q := contracts.AssignmentQuery{AccountRef: credential.AccountRef, CourseRef: "canvas:course:1", View: "deadlines_v1", Limit: 10}
@@ -109,7 +109,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	defer session.Close()
 	tools, e := session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != 4 {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+1 {
 		t.Fatal("unexpected tools", e)
 	}
 	publicInput := json.RawMessage(`{"limit":3}`)
@@ -145,6 +145,30 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if json.Unmarshal(publicMCPRaw, &publicMCP) != nil || !reflect.DeepEqual(publicSDK.Data, publicMCP.Data) {
 		t.Fatal("MCP public differs from SDK")
 	}
+	// Navigation uses the same authenticated IPC and result shape as public queries.
+	navRaw, e := c.Invoke(ctx, contracts.Invocation{Capability: "development.activities.navigate", Input: json.RawMessage(`{"limit":2}`)})
+	var navSDK contracts.Response
+	if e != nil || json.Unmarshal(navRaw, &navSDK) != nil || len(navSDK.Data.Items) != 2 || navSDK.Data.Items[0].Navigation == nil {
+		t.Fatal("SDK navigation invocation", e)
+	}
+	out.Reset()
+	diag.Reset()
+	if cli.Execute(ctx, []string{"development", "activities", "navigate", "--connection", path, "--limit", "2", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+		t.Fatal("connected navigation CLI", diag.String())
+	}
+	var navCLI contracts.Response
+	if json.Unmarshal(out.Bytes(), &navCLI) != nil || !reflect.DeepEqual(navSDK.Data, navCLI.Data) {
+		t.Fatal("CLI navigation differs from SDK")
+	}
+	navResult, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "development_activities_navigate", Arguments: map[string]any{"limit": 2}})
+	if e != nil || navResult.IsError {
+		t.Fatal("connected navigation MCP", navResult, e)
+	}
+	navMCPRaw, _ := json.Marshal(navResult.StructuredContent)
+	var navMCP contracts.Response
+	if json.Unmarshal(navMCPRaw, &navMCP) != nil || !reflect.DeepEqual(navSDK.Data, navMCP.Data) {
+		t.Fatal("MCP navigation differs from SDK")
+	}
 	result, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "canvas_assignments_list", Arguments: q})
 	if e != nil || result.IsError {
 		t.Fatal("MCP query", e)
@@ -163,11 +187,11 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 		t.Fatal("stale MCP call survived revoke", e)
 	}
 	tools, e = session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != 3 {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities()) {
 		t.Fatal("revoked tool discovery", e)
 	}
 	caps, e = c.Capabilities(ctx)
-	if e != nil || len(caps) != 3 {
+	if e != nil || len(caps) != len(contracts.PublicCapabilities()) {
 		t.Fatal("grant revoke removed public directory", e)
 	}
 	if _, e = c.Invoke(ctx, contracts.Invocation{Capability: "public.services.list", Input: publicInput}); e != nil {
@@ -183,6 +207,9 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "app_revoke", ClientID: "b"}); e != nil {
 		t.Fatal(e)
+	}
+	if _, e = c.Invoke(ctx, contracts.Invocation{Capability: "development.activities.navigate"}); e == nil {
+		t.Fatal("revoked application retained navigation access through its connection")
 	}
 	if _, e = c.Capabilities(ctx); e == nil {
 		t.Fatal("revoked app discovered public capabilities")

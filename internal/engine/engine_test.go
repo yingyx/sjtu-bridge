@@ -12,7 +12,7 @@ import (
 )
 
 func definition(handler Handler) Definition {
-	return Definition{Capability: contracts.Capability{ID: "public.services.list", ContractVersion: "1", Provider: "publicinfo", DataClass: "public", Effects: []string{"none"}}, Handler: handler}
+	return Definition{Capability: contracts.Capability{ID: "public.services.list", ContractVersion: "1", Provider: "publicinfo", DataClass: "public", Effects: []string{"none"}, Operation: contracts.Read, Delivery: contracts.QueryDelivery, Credentials: []string{}}, Handler: handler}
 }
 func empty(context.Context, contracts.ListInput) (contracts.Response, error) {
 	return contracts.Response{Data: contracts.Data{Items: []contracts.Item{}}, Meta: contracts.Meta{Sources: []contracts.Source{}, Completeness: "complete"}}, nil
@@ -47,6 +47,12 @@ func TestDenyBeforeProvider(t *testing.T) {
 		func(c *contracts.Capability) { c.ID = "public.new.list" },
 		func(c *contracts.Capability) { c.ContractVersion = "2" },
 		func(c *contracts.Capability) { c.Provider = "other" },
+		func(c *contracts.Capability) { c.Operation = contracts.Write },
+		func(c *contracts.Capability) { c.Operation = contracts.HighImpactWrite },
+		func(c *contracts.Capability) { c.Operation = "" },
+		func(c *contracts.Capability) { c.Operation = "future_operation" },
+		func(c *contracts.Capability) { c.Delivery = contracts.NavigationDelivery },
+		func(c *contracts.Capability) { c.Credentials = []string{"JAAuthCookie"} },
 	} {
 		copy := d
 		mutate(&copy.Capability)

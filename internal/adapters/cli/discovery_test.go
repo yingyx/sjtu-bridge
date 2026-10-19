@@ -46,11 +46,14 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		args []string
 		ids  []string
 	}{
-		{[]string{"list"}, []string{"public.calendars.list", "public.notices.list", "public.services.list"}},
+		{[]string{"list"}, []string{"administration.fees.list", "administration.payments.navigate", "campus.maps.navigate", "campus.organizations.list", "development.activities.navigate", "development.notices.list", "digital.network.navigate", "digital.support.list", "learning.practice.navigate", "library.borrowing.list", "library.spaces.navigate", "life.health.list", "life.sports.navigate", "public.calendars.list", "public.notices.list", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
 		{[]string{"search", "校历"}, []string{"public.calendars.list"}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list"}},
 		{[]string{"search", "作业"}, []string{}},
+		{[]string{"list", "--category", "development", "--task-group", "activities"}, []string{"development.activities.navigate", "development.notices.list", "learning.practice.navigate"}},
+		{[]string{"search", "二课", "--category", "learning", "--task-group", "practice"}, []string{"development.activities.navigate", "learning.practice.navigate"}},
+		{[]string{"list", "--category", "research", "--task-group", "activities"}, []string{}},
 	} {
 		var out, diag bytes.Buffer
 		args := append([]string{"capabilities"}, test.args...)

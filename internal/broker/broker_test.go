@@ -467,13 +467,14 @@ func TestUnifiedDiscoveryAndPublicInvocation(t *testing.T) {
 			t.Fatalf("public: %s", w.Body.String())
 		}
 	}
-	checkDiscovery(h.a, 4)
-	checkDiscovery(h.bToken, 4)
+	publicCount := len(contracts.PublicCapabilities())
+	checkDiscovery(h.a, publicCount+1)
+	checkDiscovery(h.bToken, publicCount+1)
 	checkPublic(h.a)
 	if _, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"}); e != nil {
 		t.Fatal(e)
 	}
-	checkDiscovery(h.a, 3)
+	checkDiscovery(h.a, publicCount)
 	checkPublic(h.a)
 	_, e := invoke(h.b, h.a, query("summary_v1", "1"))
 	mustCode(t, e, "PERMISSION_DENIED")
@@ -493,7 +494,7 @@ func TestUnifiedDiscoveryAndPublicInvocation(t *testing.T) {
 			}
 		}
 	}
-	checkDiscovery(h.bToken, 4)
+	checkDiscovery(h.bToken, publicCount+1)
 }
 
 type pausedPublic struct {

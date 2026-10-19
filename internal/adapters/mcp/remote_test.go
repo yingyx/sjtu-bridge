@@ -56,6 +56,7 @@ func remoteCapabilities() []contracts.Capability {
 			Category: "academic", CategoryLabel: "教务与学习", Service: "合成测试服务",
 			Aliases: []string{"查作业", "查询截止日期"}, Keywords: []string{"deadline", "assignment"},
 			DataClass: "public", Effects: []string{"none"}, Authorized: true,
+			Operation: contracts.Read, Delivery: contracts.QueryDelivery,
 			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
 		})
 	}
