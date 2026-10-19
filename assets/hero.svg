@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title description">
+  <title id="title">SJTU Bridge</title>
+  <desc id="description">One bridge to SJTU, for humans and agents. Eight scattered service nodes weave through a shared crimson ribbon into three application endpoints.</desc>
+  <rect width="1200" height="260" fill="#ffffff"/>
+  <rect x="56" y="54" width="32" height="5" rx="2.5" fill="#b42332"/>
+  <text x="54" y="120" fill="#192029" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="52" font-weight="650" letter-spacing="-1.6">SJTU Bridge</text>
+  <text x="57" y="160" fill="#65707b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18">One bridge to SJTU, for humans and agents.</text>
+  <g fill="none" stroke="#d5dce2" stroke-width="1.5" stroke-linecap="round">
+    <path d="M738 51C821 51 815 81 874 81"/>
+    <path d="M711 97C788 97 810 81 874 81"/>
+    <path d="M758 111C815 111 817 81 874 81"/>
+    <path d="M732 154C807 154 812 81 874 81"/>
+    <path d="M762 185C817 185 818 179 874 179"/>
+    <path d="M714 207C802 207 810 179 874 179"/>
+    <path d="M791 43C835 43 832 179 874 179"/>
+    <path d="M799 223C841 223 837 179 874 179"/>
+  </g>
+  <g fill="none" stroke-linecap="round">
+    <path d="M874 81C935 81 926 179 991 179C1034 179 1039 80 1119 80" stroke="#b42332" stroke-width="4"/>
+    <path d="M874 179C935 179 926 81 991 81C1034 81 1039 180 1119 180" stroke="#cf6670" stroke-width="4"/>
+    <path d="M929 130C994 130 1042 130 1119 130" stroke="#ffffff" stroke-width="8"/>
+    <path d="M929 130C994 130 1042 130 1119 130" stroke="#b42332" stroke-width="2"/>
+  </g>
+  <g fill="#ffffff" stroke="#bac5ce" stroke-width="1.5">
+    <circle cx="738" cy="51" r="4"/>
+    <circle cx="711" cy="97" r="4"/>
+    <circle cx="758" cy="111" r="4"/>
+    <circle cx="732" cy="154" r="4"/>
+    <circle cx="762" cy="185" r="4"/>
+    <circle cx="714" cy="207" r="4"/>
+    <circle cx="791" cy="43" r="4"/>
+    <circle cx="799" cy="223" r="4"/>
+  </g>
+  <g fill="#ffffff" stroke="#b42332" stroke-width="2">
+    <rect x="1115" y="76" width="8" height="8" rx="2"/>
+    <rect x="1115" y="126" width="8" height="8" rx="2"/>
+    <rect x="1115" y="176" width="8" height="8" rx="2"/>
+  </g>
+</svg>
