@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title description">
   <title id="title">SJTU Bridge</title>
-  <desc id="description">One bridge to SJTU, for humans and agents. Eight scattered service nodes weave through a shared crimson ribbon into three application endpoints.</desc>
-  <rect width="1200" height="260" fill="#ffffff"/>
+  <desc id="description">One bridge to SJTU, for humans and agents. 一处部署，多端共用：一份本机 Bridge，连接应用与 Agent。任务导航，直达能力：按校园任务检索，直接调用已接入能力。凭据托管，最小授权：上游凭据留在 Broker，应用按需获权、独立撤销。</desc>
+  <rect width="1200" height="420" fill="#ffffff"/>
   <rect x="56" y="54" width="32" height="5" rx="2.5" fill="#b42332"/>
   <text x="54" y="120" fill="#192029" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="52" font-weight="650" letter-spacing="-1.6">SJTU Bridge</text>
   <text x="57" y="160" fill="#65707b" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18">One bridge to SJTU, for humans and agents.</text>
@@ -35,5 +35,26 @@
     <rect x="1115" y="76" width="8" height="8" rx="2"/>
     <rect x="1115" y="126" width="8" height="8" rx="2"/>
     <rect x="1115" y="176" width="8" height="8" rx="2"/>
+  </g>
+  <path d="M56 260H1144" stroke="#e7ebee"/>
+  <g fill="#f7f8fa">
+    <rect x="56" y="282" width="352" height="110" rx="12"/>
+    <rect x="424" y="282" width="352" height="110" rx="12"/>
+    <rect x="792" y="282" width="352" height="110" rx="12"/>
+  </g>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, Helvetica, Arial, sans-serif">
+    <g fill="#b42332" font-size="19" font-weight="600">
+      <text x="76" y="315">一处部署，多端共用</text>
+      <text x="444" y="315">任务导航，直达能力</text>
+      <text x="812" y="315">凭据托管，最小授权</text>
+    </g>
+    <g fill="#65707b" font-size="16">
+      <text x="76" y="346">一份本机 Bridge，连接应用与 Agent</text>
+      <text x="76" y="372">共享服务适配，无需重复实现</text>
+      <text x="444" y="346">按校园任务检索，直达已接入能力</text>
+      <text x="444" y="372">省去浏览页面、搜索入口的步骤</text>
+      <text x="812" y="346">上游凭据留在 Broker</text>
+      <text x="812" y="372">应用按需获权，授权独立撤销</text>
+    </g>
   </g>
 </svg>
