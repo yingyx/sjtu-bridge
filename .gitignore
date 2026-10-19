@@ -1,0 +1,17 @@
+/bin/
+/dist/
+/sjtu
+*.exe
+*.test
+coverage.out
+/state.json
+*.sealed
+*.connection
+connection.json
+audit.jsonl
+broker.lock
+*.credentials.json
+/.tmp/
+.env
+.env.*
+!.env.example
