@@ -1,6 +1,21 @@
 package domain
 
-import "context"
+import (
+	"context"
+
+	"github.com/yingyx/sjtu-bridge/contracts"
+)
+
+type CampusPage struct {
+	AccountRef string
+	Rows       []contracts.CampusRecord
+	Next       string
+	Coverage   string
+}
+type Campus interface {
+	Identity(context.Context, []byte) (string, error)
+	Read(context.Context, []byte, string, contracts.CampusQuery, string) (CampusPage, error)
+}
 
 type CanvasCourse struct {
 	Ref   string `json:"course_ref"`

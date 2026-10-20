@@ -68,6 +68,7 @@ type Grant struct {
 	AccountRef   string    `json:"account_ref"`
 	CredentialID string    `json:"credential_id"`
 	Courses      []string  `json:"course_refs"`
+	Resources    []string  `json:"resource_refs,omitempty"`
 	View         string    `json:"view"`
 	Limit        int       `json:"limit"`
 	Generation   uint64    `json:"generation"`
@@ -154,7 +155,7 @@ func Open(dir string, k Keyring) (*Store, error) {
 		st.fences["app:"+id] = &sync.RWMutex{}
 	}
 	for id, c := range s.Credentials {
-		if c.ID != id || c.Provider != "canvas" || c.Kind != "CanvasToken" || c.Generation == 0 || c.AccountRef == "" {
+		if c.ID != id || !validCredential(c) || c.Generation == 0 || c.AccountRef == "" {
 			return nil, fail("Invalid credential state")
 		}
 		st.fences["credential:"+id] = &sync.RWMutex{}
@@ -167,7 +168,7 @@ func Open(dir string, k Keyring) (*Store, error) {
 		}
 	}
 	for id, g := range s.Grants {
-		if g.ID == "" || id != g.ClientID || g.Capability != contracts.AssignmentsCapability || g.Version != "1" || g.Generation == 0 || g.Limit < 1 || g.Limit > 100 || (g.View != "summary_v1" && g.View != "deadlines_v1") || len(g.Courses) == 0 {
+		if g.ID == "" || id != g.ClientID || !validGrant(g) || g.Version != "1" || g.Generation == 0 || g.Limit < 1 || g.Limit > 100 {
 			return nil, fail("Invalid grant state")
 		}
 	}
@@ -256,11 +257,14 @@ type Lease struct {
 }
 
 func (s *Store) Resolve(token string, q contracts.AssignmentQuery) (Lease, error) {
+	return s.ResolveRead(token, contracts.ReadScope{Capability: contracts.AssignmentsCapability, AccountRef: q.AccountRef, ResourceRef: q.CourseRef, View: q.View, Limit: q.Limit})
+}
+func (s *Store) ResolveRead(token string, q contracts.ReadScope) (Lease, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.resolve(token, q)
 }
-func (s *Store) resolve(token string, q contracts.AssignmentQuery) (Lease, error) {
+func (s *Store) resolve(token string, q contracts.ReadScope) (Lease, error) {
 	now := time.Now()
 	a, e := s.authenticate(token)
 	if e != nil {
@@ -271,15 +275,16 @@ func (s *Store) resolve(token string, q contracts.AssignmentQuery) (Lease, error
 	denied := func() (Lease, error) {
 		return Lease{}, contracts.Fail("PERMISSION_DENIED", "Capability, account, resource or view is not authorized")
 	}
-	if !g.Active || g.Capability != contracts.AssignmentsCapability || g.Version != "1" || !now.Before(g.Expires) || !c.Active || s.denied["credential:"+c.ID] || s.denied["grant:"+a.ID] || c.AccountRef != g.AccountRef || (c.Expires != nil && !now.Before(*c.Expires)) {
+	metadata, known := contracts.PersonalMetadata(g.Capability)
+	if !g.Active || !known || !validGrant(g) || !validCredential(c) || c.Provider != metadata.Provider || g.Capability != q.Capability || g.Version != "1" || !now.Before(g.Expires) || !c.Active || s.denied["credential:"+c.ID] || s.denied["grant:"+a.ID] || c.AccountRef != g.AccountRef || (c.Expires != nil && !now.Before(*c.Expires)) {
 		return denied()
 	}
-	if q.AccountRef != g.AccountRef || q.View != g.View || q.Limit > g.Limit {
+	if q.AccountRef != g.AccountRef || q.View != g.View || q.Limit < 1 || q.Limit > g.Limit {
 		return denied()
 	}
 	found := false
-	for _, r := range g.Courses {
-		if r == q.CourseRef {
+	for _, r := range grantResources(g) {
+		if r == q.ResourceRef {
 			found = true
 		}
 	}
@@ -287,6 +292,7 @@ func (s *Store) resolve(token string, q contracts.AssignmentQuery) (Lease, error
 		return denied()
 	}
 	g.Courses = append([]string(nil), g.Courses...)
+	g.Resources = append([]string(nil), g.Resources...)
 	return Lease{a, g, c, s.fences["app:"+a.ID], s.fences["credential:"+c.ID]}, nil
 }
 func (s *Store) authenticate(token string) (App, error) {
@@ -313,10 +319,10 @@ func (s *Store) Discover(token string, send func(*Lease) error) error {
 	g := s.state.Grants[a.ID]
 	f := s.fences["app:"+a.ID]
 	s.mu.RUnlock()
-	if len(g.Courses) > 0 {
-		q := contracts.AssignmentQuery{AccountRef: g.AccountRef, CourseRef: g.Courses[0], View: g.View, Limit: 1}
-		if l, e := s.Resolve(token, q); e == nil {
-			return s.Publish(token, q, l, func() error { return send(&l) })
+	if resources := grantResources(g); len(resources) > 0 {
+		q := contracts.ReadScope{Capability: g.Capability, AccountRef: g.AccountRef, ResourceRef: resources[0], View: g.View, Limit: 1}
+		if l, e := s.ResolveRead(token, q); e == nil {
+			return s.PublishRead(token, q, l, func() error { return send(&l) })
 		}
 	}
 	f.RLock()
@@ -330,11 +336,14 @@ func (s *Store) Discover(token string, send func(*Lease) error) error {
 	return send(nil)
 }
 func (s *Store) Publish(token string, q contracts.AssignmentQuery, l Lease, send func() error) error {
+	return s.PublishRead(token, contracts.ReadScope{Capability: contracts.AssignmentsCapability, AccountRef: q.AccountRef, ResourceRef: q.CourseRef, View: q.View, Limit: q.Limit}, l, send)
+}
+func (s *Store) PublishRead(token string, q contracts.ReadScope, l Lease, send func() error) error {
 	l.credFence.RLock()
 	defer l.credFence.RUnlock()
 	l.appFence.RLock()
 	defer l.appFence.RUnlock()
-	n, e := s.Resolve(token, q)
+	n, e := s.ResolveRead(token, q)
 	if e != nil {
 		return e
 	}

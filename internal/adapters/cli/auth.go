@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -46,18 +47,35 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	root.AddCommand(bc)
 	authCmd := &cobra.Command{Use: "auth", GroupID: "management", Short: "用户凭据导入、移除与会话诊断"}
 	provider, label := "", "main"
+	var browserContext bool
 	importCmd := &cobra.Command{Use: "import", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if provider == "jaccount" {
 			return contracts.Fail("NOT_READY", "JAAuthCookie stable identity is not ready for persistent import")
 		}
-		if provider != "canvas" {
-			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas")
+		if provider != "canvas" && provider != "teaching" && provider != "sjtumail" {
+			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, teaching or sjtumail")
 		}
-		secret, e := auth.ReadCredential(input, diag, provider, true)
+		if browserContext && provider == "canvas" {
+			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for teaching and sjtumail")
+		}
+		normalizer := provider
+		if provider != "canvas" {
+			normalizer = "jaccount"
+		}
+		secret, e := auth.ReadCredential(input, diag, normalizer, true)
 		if e != nil {
 			return e
 		}
 		defer clear(secret)
+		if browserContext {
+			contextSecret, err := auth.ReadCampusContext(input, diag, secret)
+			if err != nil {
+				return err
+			}
+			clear(secret)
+			secret = contextSecret
+			defer clear(contextSecret)
+		}
 		q := broker.AdminRequest{Action: "verify", Provider: provider, Secret: secret}
 		var verified map[string]string
 		if e = broker.OwnerCall(cmd.Context(), q, &verified); e != nil {
@@ -75,8 +93,9 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return writeJSON(out, v)
 	}}
-	importCmd.Flags().StringVar(&provider, "provider", "", "Credential provider (canvas; jaccount not ready)")
+	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), teaching / sjtumail (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
+	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
 	checkProvider := ""
 	check := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -180,10 +199,12 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	grant.Flags().StringVar(&g.CredentialID, "credential", "", "Verified credential ID")
 	grant.Flags().StringVar(&g.AccountRef, "account", "", "Stable account_ref (canvas:user:ID)")
 	grant.Flags().StringSliceVar(&g.Courses, "courses", nil, "Exact course_refs, comma separated")
-	grant.Flags().StringVar(&g.View, "view", "", "summary_v1 or deadlines_v1")
+	grant.Flags().StringVar(&g.Capability, "capability", contracts.AssignmentsCapability, "Exact capability ID; one active grant per app")
+	grant.Flags().StringSliceVar(&g.Resources, "resources", nil, "Exact portal resource_refs, e.g. teaching:term:2026:1 or mail:folder:inbox")
+	grant.Flags().StringVar(&g.View, "view", "", "Canvas: summary_v1/deadlines_v1; timetable: schedule_v1; inbox: headers_v1")
 	grant.Flags().IntVar(&g.Limit, "limit", 20, "Per-call item cap (1-100)")
 	grant.Flags().IntVar(&g.Days, "days", 30, "Grant lifetime (1-30 days)")
-	for _, flag := range []string{"app", "credential", "account", "courses", "view"} {
+	for _, flag := range []string{"app", "credential", "account", "view"} {
 		_ = grant.MarkFlagRequired(flag)
 	}
 	permissions.AddCommand(grant)
@@ -218,4 +239,47 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	assignments.AddCommand(list)
 	canvas.AddCommand(assignments)
 	root.AddCommand(canvas)
+	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability} {
+		metadata, _ := contracts.PersonalMetadata(id)
+		parts := strings.Split(id, ".")
+		group := findCommand(root, parts[0])
+		if group == nil {
+			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: metadata.CategoryLabel}
+			root.AddCommand(group)
+		}
+		resource := &cobra.Command{Use: parts[1]}
+		group.AddCommand(resource)
+		var q contracts.CampusQuery
+		list := &cobra.Command{Use: parts[2], Short: metadata.Title, Long: metadata.Description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			c, e := client.Open(*connection)
+			if e != nil {
+				return e
+			}
+			defer c.Close()
+			raw, _ := json.Marshal(q)
+			v, e := c.Invoke(cmd.Context(), contracts.Invocation{Capability: id, Input: raw})
+			if e != nil {
+				return e
+			}
+			return writeJSON(out, v)
+		}}
+		list.Flags().StringVar(&q.AccountRef, "account", "", "Granted stable portal account_ref")
+		list.Flags().StringVar(&q.ResourceRef, "resource", "", "Granted term or inbox resource_ref")
+		list.Flags().StringVar(&q.View, "view", "", "Granted schedule_v1 or headers_v1 view")
+		list.Flags().IntVar(&q.Limit, "limit", 20, "Maximum items for one page (mail <=50)")
+		list.Flags().StringVar(&q.Cursor, "cursor", "", "Opaque Broker continuation")
+		if id == contracts.MailCapability {
+			list.Flags().StringVar(&q.Query, "query", "", "Literal subject keywords; no message body search")
+		}
+		resource.AddCommand(list)
+	}
+}
+
+func findCommand(parent *cobra.Command, name string) *cobra.Command {
+	for _, c := range parent.Commands() {
+		if c.Name() == name {
+			return c
+		}
+	}
+	return nil
 }

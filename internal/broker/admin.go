@@ -14,22 +14,32 @@ import (
 )
 
 type AdminRequest struct {
-	Action          string   `json:"action"`
-	ClientID        string   `json:"client_id,omitempty"`
-	Provider        string   `json:"provider,omitempty"`
-	Secret          []byte   `json:"secret,omitempty"`
-	Label           string   `json:"label,omitempty"`
-	ExpectedAccount string   `json:"expected_account,omitempty"`
-	CredentialID    string   `json:"credential_id,omitempty"`
-	AccountRef      string   `json:"account_ref,omitempty"`
-	Courses         []string `json:"course_refs,omitempty"`
-	View            string   `json:"view,omitempty"`
-	Limit           int      `json:"limit,omitempty"`
-	Days            int      `json:"days,omitempty"`
-	Path            string   `json:"path,omitempty"`
+	Capability         string   `json:"capability,omitempty"`
+	Resources          []string `json:"resource_refs,omitempty"`
+	Action             string   `json:"action"`
+	ClientID           string   `json:"client_id,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	Secret             []byte   `json:"secret,omitempty"`
+	Label              string   `json:"label,omitempty"`
+	ExpectedAccount    string   `json:"expected_account,omitempty"`
+	CredentialID       string   `json:"credential_id,omitempty"`
+	SourceCredentialID string   `json:"source_credential_id,omitempty"`
+	AccountRef         string   `json:"account_ref,omitempty"`
+	Courses            []string `json:"course_refs,omitempty"`
+	View               string   `json:"view,omitempty"`
+	Limit              int      `json:"limit,omitempty"`
+	Days               int      `json:"days,omitempty"`
+	Path               string   `json:"path,omitempty"`
 }
 
 var name = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+// Carries the exact source generation to the owner HTTP publication boundary.
+// This internal result is never marshaled directly or exposed as an API type.
+type sourceVerification struct {
+	account string
+	source  storage.Credential
+}
 
 func lifetime(days int) (time.Time, error) {
 	if days == 0 {
@@ -63,6 +73,9 @@ func (b *Broker) Manage(ctx context.Context, q AdminRequest) (any, error) {
 }
 func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 	// This method is internal; HTTP authenticates the distinct owner secret first.
+	if q.SourceCredentialID != "" && q.Action != "verify" && q.Action != "import" {
+		return nil, contracts.Fail("INVALID_ARGUMENT", "Credential reuse is only available for owner verification and import")
+	}
 	s := b.Store.Snapshot()
 	switch q.Action {
 	case "status":
@@ -71,7 +84,7 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		for _, a := range s.Apps {
 			apps = append(apps, map[string]any{"id": a.ID, "active": a.Active, "expires": a.Expires, "generation": a.Generation})
 		}
-		return map[string]any{"revision": s.Revision, "apps": apps, "credentials": s.Credentials, "grants": s.Grants, "jaccount": "not_ready"}, nil
+		return map[string]any{"revision": s.Revision, "apps": apps, "credentials": s.Credentials, "grants": s.Grants, "jaccount": "portal_specific_identity_required"}, nil
 	case "verify", "import":
 		if q.Action == "import" && len(s.Credentials) >= 256 {
 			return nil, contracts.Fail("RATE_LIMITED", "Credential record capacity reached")
@@ -79,51 +92,119 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		if q.Provider == "jaccount" {
 			return nil, contracts.Fail("NOT_READY", "JAAuthCookie has no verified stable identity; persistent import is disabled")
 		}
-		if q.Provider != "canvas" {
+		if q.Provider != "canvas" && b.Engine.CampusProviders[q.Provider] == nil {
 			return nil, contracts.Fail("UNSUPPORTED", "Credential provider is not ready")
 		}
-		secret, e := auth.Normalize("canvas", q.Secret)
+		normalizer, kind := "canvas", "CanvasToken"
+		if q.Provider != "canvas" {
+			normalizer, kind = "jaccount", "JAAuthCookie"
+		}
+		var secret []byte
+		var e error
+		source := storage.Credential{}
+		if q.SourceCredentialID != "" {
+			source = s.Credentials[q.SourceCredentialID]
+			if len(q.Secret) != 0 || !source.Active || source.Kind != "JAAuthCookie" || source.Provider == q.Provider || q.Provider == "canvas" || b.Engine.CampusProviders[source.Provider] == nil {
+				return nil, contracts.Fail("PERMISSION_DENIED", "Active credential from another supported campus portal required")
+			}
+			if e = b.Store.CheckSourceCredential(source); e != nil {
+				return nil, e
+			}
+		} else if q.Provider == "canvas" {
+			secret, e = auth.Normalize(normalizer, q.Secret)
+		} else {
+			secret, e = auth.NormalizeCampusCredential(q.Secret)
+		}
 		if e != nil {
 			return nil, e
 		}
-		defer clear(secret)
+		defer func() { clear(secret) }()
 		account := ""
 		e = b.Engine.Do(ctx, func(ctx context.Context) error {
 			var e error
-			account, e = b.Engine.Provider.Identity(ctx, secret)
+			if source.ID != "" {
+				stored, err := b.Store.SourceCredentialSecret(source)
+				if err != nil {
+					return err
+				}
+				defer clear(stored)
+				secret, e = auth.NormalizeCampusCredential(stored)
+				if e != nil {
+					return e
+				}
+			}
+			if q.Provider == "canvas" {
+				account, e = b.Engine.Provider.Identity(ctx, secret)
+			} else {
+				account, e = b.Engine.CampusProviders[q.Provider].Identity(ctx, secret)
+			}
 			return e
 		})
 		if e != nil {
 			return nil, e
 		}
+		sourceActive := func(state storage.State) bool {
+			if source.ID == "" {
+				return true
+			}
+			current := state.Credentials[source.ID]
+			return current.Active && current.Generation == source.Generation && current.Provider == source.Provider && current.Kind == source.Kind && current.AccountRef == source.AccountRef && (current.Expires == nil || time.Now().Before(*current.Expires))
+		}
+		if source.ID != "" {
+			if e = b.Store.CheckSourceCredential(source); e != nil {
+				return nil, e
+			}
+		}
+		if !sourceActive(b.Store.Snapshot()) {
+			return nil, contracts.Fail("AUTH_REQUIRED", "Source credential changed during verification")
+		}
 		if q.Action == "verify" {
+			if source.ID != "" {
+				return sourceVerification{account: account, source: source}, nil
+			}
 			return map[string]string{"account_ref": account}, nil
 		}
 		b.adminMu.Lock()
 		defer b.adminMu.Unlock()
+		if source.ID != "" {
+			unlockSource := b.Store.Fence("credential", source.ID)
+			defer unlockSource()
+			if e = b.Store.CheckSourceCredential(source); e != nil {
+				return nil, e
+			}
+		}
 		s = b.Store.Snapshot()
+		if !sourceActive(s) {
+			return nil, contracts.Fail("AUTH_REQUIRED", "Source credential changed during import")
+		}
 		if len(s.Credentials) >= 256 {
 			return nil, contracts.Fail("RATE_LIMITED", "Credential record capacity reached")
 		}
 		if !name.MatchString(q.Label) || q.ExpectedAccount != account {
-			return nil, contracts.Fail("PERMISSION_DENIED", "Confirmed account does not match verified Canvas identity")
+			return nil, contracts.Fail("PERMISSION_DENIED", "Confirmed account does not match verified portal identity")
 		}
 		old := storage.Credential{}
 		for _, c := range s.Credentials {
-			if c.Active && c.Label == q.Label {
+			if c.Active && c.Label == q.Label && c.Provider == q.Provider {
 				if c.AccountRef != account {
 					return nil, contracts.Fail("PERMISSION_DENIED", "Existing account binding does not match")
 				}
 				old = c
 			}
 		}
-		c := storage.Credential{ID: local.Random(), Provider: "canvas", Kind: "CanvasToken", AccountRef: account, Label: q.Label, Generation: 1, Active: true}
+		c := storage.Credential{ID: local.Random(), Provider: q.Provider, Kind: kind, AccountRef: account, Label: q.Label, Generation: 1, Active: true}
+		if source.ID != "" {
+			c.Expires = source.Expires
+		}
 		if e = b.Store.Encrypt(c, secret); e != nil {
 			return nil, e
 		}
 		unlock := b.Store.Fence("credential", old.ID)
 		defer unlock()
 		e = b.Store.Update([]string{"credential:" + old.ID}, func(s *storage.State) error {
+			if !sourceActive(*s) {
+				return contracts.Fail("AUTH_REQUIRED", "Source credential changed during import")
+			}
 			if old.ID != "" {
 				v := s.Credentials[old.ID]
 				v.Active = false
@@ -152,7 +233,7 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		return c, nil
 	case "courses":
 		c := s.Credentials[q.CredentialID]
-		if !c.Active {
+		if !c.Active || c.Provider != "canvas" {
 			return nil, contracts.Fail("AUTH_REQUIRED", "Active credential required")
 		}
 		var courses []domain.CanvasCourse
@@ -206,9 +287,15 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		}
 		return map[string]any{"client_id": a.ID, "connection_file": q.Path, "expires": a.Expires}, nil
 	case "grant":
+		if q.Capability != "" && q.Capability != contracts.AssignmentsCapability {
+			return b.grantCampus(ctx, q, s)
+		}
+		if len(q.Resources) != 0 {
+			return nil, contracts.Fail("INVALID_ARGUMENT", "Canvas grants use course_refs only")
+		}
 		a := s.Apps[q.ClientID]
 		c := s.Credentials[q.CredentialID]
-		if !a.Active || !time.Now().Before(a.Expires) || !c.Active || q.AccountRef != c.AccountRef {
+		if !a.Active || !time.Now().Before(a.Expires) || !c.Active || c.Provider != "canvas" || q.AccountRef != c.AccountRef {
 			return nil, contracts.Fail("PERMISSION_DENIED", "Active app and matching credential required")
 		}
 		if (q.View != "summary_v1" && q.View != "deadlines_v1") || q.Limit < 1 || q.Limit > 100 || len(q.Courses) < 1 || len(q.Courses) > 100 {

@@ -13,6 +13,7 @@ import (
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/domain"
 	"github.com/yingyx/sjtu-bridge/internal/local"
+	"github.com/yingyx/sjtu-bridge/internal/policy"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
 )
 
@@ -28,6 +29,8 @@ type cursor struct {
 	Query                     contracts.AssignmentQuery
 	Next                      string
 	Expires                   time.Time
+	CampusID                  string
+	CampusQuery               contracts.CampusQuery
 }
 type active struct {
 	AppID, CredentialID string
@@ -36,20 +39,22 @@ type active struct {
 
 // Personal runs only inside the Broker. No adapter constructs it with a secret.
 type Personal struct {
-	Store         *storage.Store
-	Provider      domain.Canvas
-	Audit         Auditor
-	mu            sync.Mutex
-	cursors       map[string]cursor
-	active        map[string]active
-	admission     chan struct{}
-	global        chan struct{}
-	provider      chan struct{}
-	BeforePublish func() // deterministic test barrier, nil in production
+	capability      contracts.Capability // immutable reviewed definition
+	Store           *storage.Store
+	Provider        domain.Canvas
+	CampusProviders map[string]domain.Campus
+	Audit           Auditor
+	mu              sync.Mutex
+	cursors         map[string]cursor
+	active          map[string]active
+	admission       chan struct{}
+	global          chan struct{}
+	provider        chan struct{}
+	BeforePublish   func() // deterministic test barrier, nil in production
 }
 
 func NewPersonal(s *storage.Store, p domain.Canvas, a Auditor) *Personal {
-	return &Personal{Store: s, Provider: p, Audit: a, cursors: map[string]cursor{}, active: map[string]active{}, admission: make(chan struct{}, 18), global: make(chan struct{}, 4), provider: make(chan struct{}, 2)}
+	return &Personal{capability: contracts.AssignmentMetadata(), Store: s, Provider: p, Audit: a, cursors: map[string]cursor{}, active: map[string]active{}, admission: make(chan struct{}, 18), global: make(chan struct{}, 4), provider: make(chan struct{}, 2)}
 }
 func (p *Personal) Do(ctx context.Context, fn func(context.Context) error) error {
 	select {
@@ -100,9 +105,19 @@ func (p *Personal) Capabilities(token string) ([]contracts.Capability, error) {
 func (p *Personal) Discover(token string, send func([]contracts.Capability) error) error {
 	return p.Store.Discover(token, func(l *storage.Lease) error {
 		caps := []contracts.Capability{}
-		if l != nil {
+		if l != nil && l.Grant.Capability == contracts.AssignmentsCapability && policy.PersonalAllowed(p.capability) {
 			g := l.Grant
-			caps = append(caps, contracts.AssignmentCapability(g.AccountRef, g.Courses, g.View, g.Limit))
+			scoped := contracts.AssignmentCapability(g.AccountRef, g.Courses, g.View, g.Limit)
+			c := contracts.CloneCapability(p.capability)
+			c.Authorized, c.InputSchema, c.OutputSchema = true, scoped.InputSchema, scoped.OutputSchema
+			caps = append(caps, c)
+		}
+		if l != nil && l.Grant.Capability != contracts.AssignmentsCapability {
+			g := l.Grant
+			c, ok := contracts.CampusCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit)
+			if ok && policy.PersonalAllowed(c) && p.CampusProviders[c.Provider] != nil {
+				caps = append(caps, c)
+			}
 		}
 		return send(caps)
 	})
@@ -147,6 +162,9 @@ func Safe(err error) error {
 // Invoke publishes exactly one bounded JSON buffer. Authorization is checked
 // under the same per-object fences used by durable management revocations.
 func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
+	if inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability {
+		return p.invokeCampus(ctx, token, inv, send)
+	}
 	ctx, deadlineCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer deadlineCancel()
 	started := time.Now()
@@ -164,7 +182,7 @@ func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invoc
 			_ = p.Audit.Write(event)
 		}
 	}()
-	if inv.Capability != contracts.AssignmentsCapability || inv.AccountRef != "" {
+	if inv.Capability != contracts.AssignmentsCapability || inv.AccountRef != "" || !policy.PersonalAllowed(p.capability) {
 		return contracts.Fail("PERMISSION_DENIED", "Capability is not authorized")
 	}
 	q, err := ParseAssignment(inv.Input)
@@ -260,7 +278,7 @@ func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invoc
 		cursorID = local.Random()
 		base := q
 		base.Cursor = ""
-		p.cursors[cursorID] = cursor{l.App.ID, l.Credential.ID, l.App.Generation, l.Grant.Generation, l.Credential.Generation, base, page.Next, time.Now().Add(5 * time.Minute)}
+		p.cursors[cursorID] = cursor{AppID: l.App.ID, CredentialID: l.Credential.ID, AppGen: l.App.Generation, GrantGen: l.Grant.Generation, CredGen: l.Credential.Generation, Query: base, Next: page.Next, Expires: time.Now().Add(5 * time.Minute)}
 		p.mu.Unlock()
 		result.Meta.NextCursor = &cursorID
 		result.Meta.HasMore = true

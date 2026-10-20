@@ -22,6 +22,8 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/engine"
 	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/providers/canvas"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sjtumail"
+	"github.com/yingyx/sjtu-bridge/internal/providers/teaching"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
@@ -111,6 +113,11 @@ func Run(ctx context.Context) error {
 	defer stopMaintenance()
 	go audit.Maintain(maintenanceCtx)
 	b := New(s, canvas.Service{Client: upstream}, audit, owner, endpoint)
+	teachingService, closeTeaching := teaching.New()
+	defer closeTeaching()
+	mailService, closeMail := sjtumail.New()
+	defer closeMail()
+	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService}
 	return b.Serve(ctx, l)
 }
 func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
@@ -194,6 +201,13 @@ func (b *Broker) Handler() http.Handler {
 			writeError(w, e)
 			return
 		}
+		if verified, ok := v.(sourceVerification); ok {
+			e = b.Store.PublishSourceCredential(verified.source, func() error { writeJSON(w, map[string]string{"account_ref": verified.account}); return nil })
+			if e != nil {
+				writeError(w, e)
+			}
+			return
+		}
 		writeJSON(w, v)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +241,7 @@ func (b *Broker) invoke(ctx context.Context, token string, inv contracts.Invocat
 	if err := b.Engine.Discover(token, func([]contracts.Capability) error { return nil }); err != nil {
 		return err
 	}
-	if inv.Capability == contracts.AssignmentsCapability {
+	if inv.Capability == contracts.AssignmentsCapability || inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability {
 		return b.Engine.Invoke(ctx, token, inv, send)
 	}
 	if b.publicErr != nil {
