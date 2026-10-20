@@ -8,14 +8,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/yingyx/sjtu-bridge/contracts"
-	"github.com/yingyx/sjtu-bridge/internal/domain"
-	"github.com/yingyx/sjtu-bridge/internal/transport"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/domain"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
+	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
 const Host = "activity.sjtu.edu.cn"
@@ -41,7 +43,7 @@ func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) {
 		return false
 	}
-	q, ok := values(u, 3)
+	q, ok := sso.Values(u, 3)
 	if !ok {
 		return false
 	}

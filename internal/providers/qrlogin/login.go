@@ -16,6 +16,7 @@ import (
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/auth"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 	"golang.org/x/net/websocket"
 )
@@ -79,27 +80,15 @@ func New() (*Service, func()) {
 	return s, func() { p.Close(); a.Close() }
 }
 
-func oneQuery(u *url.URL) (url.Values, bool) {
-	q, e := url.ParseQuery(u.RawQuery)
-	if e != nil || len(q) > 5 {
-		return nil, false
-	}
-	for _, v := range q {
-		if len(v) != 1 || v[0] == "" || len(v[0]) > 4096 {
-			return nil, false
-		}
-	}
-	return q, true
-}
 func allowed(u *url.URL) bool {
 	if transport.ExactHTTPS(u, "my.sjtu.edu.cn") {
-		q, ok := oneQuery(u)
+		q, ok := sso.Values(u, 5)
 		return ok && u.Path == "/ui/appmyinfo" && (len(q) == 0 || (len(q) == 2 && q.Get("code") != "" && q.Get("state") != ""))
 	}
 	if !transport.ExactHTTPS(u, host) {
 		return false
 	}
-	q, ok := oneQuery(u)
+	q, ok := sso.Values(u, 5)
 	if !ok {
 		return false
 	}
@@ -133,37 +122,9 @@ func allowedSocket(u *url.URL) bool {
 	return transport.ExactHTTPS(&v, host) && v.RawQuery == "" && strings.HasPrefix(v.Path, "/jaccount/sub/") && uuidValue.MatchString(strings.TrimPrefix(v.Path, "/jaccount/sub/"))
 }
 func header(jar http.CookieJar, u *url.URL) http.Header {
-	h := http.Header{"User-Agent": {userAgent}, "Accept": {"text/html,application/json"}}
-	r := http.Request{Header: h}
-	for _, c := range jar.Cookies(u) {
-		r.AddCookie(c)
-	}
+	h := sso.Header(jar, u, userAgent)
+	h.Set("Accept", "text/html,application/json")
 	return h
-}
-func storeCookies(jar http.CookieJar, u *url.URL, h http.Header) error {
-	cookies := (&http.Response{Header: h}).Cookies()
-	if len(cookies) > 32 {
-		return failure("Login cookie capacity exceeded")
-	}
-	keep := []*http.Cookie{}
-	total := 0
-	for _, c := range cookies {
-		total += len(c.Name) + len(c.Value)
-		if total > 32768 {
-			return failure("Login cookie capacity exceeded")
-		}
-		if c.Name == "JAAuthCookie" || c.Name == "JATrustCookie" {
-			continue
-		}
-		if len(c.Name) > 128 || len(c.Value) > 8192 {
-			return failure("Login cookie capacity exceeded")
-		}
-		if c.Domain == "" || strings.TrimPrefix(c.Domain, ".") == u.Host {
-			keep = append(keep, c)
-		}
-	}
-	jar.SetCookies(u, keep)
-	return nil
 }
 func failure(message string) error { return contracts.Fail("UPSTREAM_CHANGED", message) }
 
@@ -294,7 +255,7 @@ func (s *Service) fetchUUID(ctx context.Context, jar http.CookieJar) (id string,
 	diagnostic := Diagnostic{Stage: "bootstrap"}
 	defer func() { err = diagnosticError(err, diagnostic) }()
 	u, _ := url.Parse(start)
-	total := 0
+	budget := sso.Budget{Limit: 1 << 20}
 	for hop := 0; hop < 6; hop++ {
 		diagnostic = Diagnostic{Stage: "bootstrap_route", Endpoint: endpoint(u), Hop: hop + 1}
 		if !allowed(u) || u.Path == "/jaccount/expresslogin" {
@@ -309,27 +270,22 @@ func (s *Service) fetchUUID(ctx context.Context, jar http.CookieJar) (id string,
 		if e != nil {
 			return "", nil, contracts.Fail("UPSTREAM_UNAVAILABLE", "QR login page unavailable")
 		}
-		total += len(r.Body)
 		if r.Status >= 100 && r.Status <= 599 {
 			diagnostic.Status = r.Status
 		}
 		diagnostic.Stage = "bootstrap_response"
-		if total > 1<<20 {
+		if !budget.Consume(len(r.Body)) {
 			return "", nil, failure("QR login page capacity exceeded")
 		}
-		if e = storeCookies(jar, u, r.Header); e != nil {
+		if e = sso.Remember(jar, u, r.Header); e != nil {
 			return "", nil, e
 		}
 		if r.Status >= 300 && r.Status < 400 {
 			diagnostic.Stage = "bootstrap_redirect"
-			if len(r.Header.Values("Location")) != 1 {
-				return "", nil, failure("Invalid QR login redirect")
-			}
-			ref, e := url.Parse(r.Header.Get("Location"))
+			next, e := sso.Redirect(r, u)
 			if e != nil {
-				return "", nil, failure("Invalid QR login redirect")
+				return "", nil, e
 			}
-			next := u.ResolveReference(ref)
 			describeRedirect(&diagnostic, next)
 			if !allowed(next) || next.Path == "/jaccount/expresslogin" {
 				return "", nil, contracts.Fail("AUTH_REQUIRED", "QR login left the reviewed flow")
@@ -358,7 +314,7 @@ func (s *Service) complete(ctx context.Context, jar http.CookieJar, id string, s
 	defer func() { err = diagnosticError(err, diagnostic) }()
 	u, _ := url.Parse("https://" + host + "/jaccount/expresslogin?" + url.Values{"uuid": {id}}.Encode())
 	c := auth.CampusCredential{Version: 1, UserAgent: userAgent}
-	total := 0
+	budget := sso.Budget{Limit: 1 << 20}
 	signInVisited := false
 	for hop := 0; hop < 6; hop++ {
 		diagnostic = Diagnostic{Stage: "completion_route", Endpoint: endpoint(u), Hop: hop + 1}
@@ -367,10 +323,8 @@ func (s *Service) complete(ctx context.Context, jar http.CookieJar, id string, s
 		}
 		h := header(jar, u)
 		if u.Host == host && strings.HasPrefix(u.Path, "/jaccount/") && c.JAAuthCookie != "" {
-			req := http.Request{Header: h}
-			req.AddCookie(&http.Cookie{Name: "JAAuthCookie", Value: c.JAAuthCookie})
-			if c.JATrustCookie != "" {
-				req.AddCookie(&http.Cookie{Name: "JATrustCookie", Value: c.JATrustCookie})
+			if e := sso.AddRoots(h, u, c); e != nil {
+				return nil, e
 			}
 		}
 		client := s.auth
@@ -382,15 +336,14 @@ func (s *Service) complete(ctx context.Context, jar http.CookieJar, id string, s
 		if e != nil {
 			return nil, contracts.Fail("UPSTREAM_UNAVAILABLE", "QR login completion failed")
 		}
-		total += len(r.Body)
 		if r.Status >= 100 && r.Status <= 599 {
 			diagnostic.Status = r.Status
 		}
 		diagnostic.Stage = "completion_response"
-		if total > 1<<20 {
+		if !budget.Consume(len(r.Body)) {
 			return nil, failure("QR login completion capacity exceeded")
 		}
-		if e = storeCookies(jar, u, r.Header); e != nil {
+		if e = sso.Remember(jar, u, r.Header); e != nil {
 			return nil, e
 		}
 		// Complete the same first-party SSO exchange as the reference product.
@@ -404,14 +357,10 @@ func (s *Service) complete(ctx context.Context, jar http.CookieJar, id string, s
 		}
 		if r.Status >= 300 && r.Status < 400 {
 			diagnostic.Stage = "completion_redirect"
-			if len(r.Header.Values("Location")) != 1 {
-				return nil, failure("Invalid QR completion redirect")
-			}
-			ref, e := url.Parse(r.Header.Get("Location"))
+			next, e := sso.Redirect(r, u)
 			if e != nil {
-				return nil, failure("Invalid QR completion redirect")
+				return nil, e
 			}
-			next := u.ResolveReference(ref)
 			describeRedirect(&diagnostic, next)
 			if !completionNext(next, signIn, c.JAAuthCookie != "", signInVisited) {
 				return nil, contracts.Fail("AUTH_REQUIRED", "QR login completion left the reviewed flow")

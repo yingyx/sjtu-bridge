@@ -96,6 +96,20 @@ func setup(t *testing.T) (*Service, *fake, contracts.CampusQuery) {
 	return &Service{Portal: f, Auth: f}, f, contracts.CampusQuery{AccountRef: "electric:user:synthetic_user", ResourceRef: "electric:room:123", View: View, Limit: 1}
 }
 
+func TestBusinessCookieCapacityFailureCannotReturnBalance(t *testing.T) {
+	s, f, q := setup(t)
+	f.alter = func(u *url.URL, r transport.Reply) transport.Reply {
+		if u.Path == "/api/ws/sydl" {
+			r.Header.Add("Set-Cookie", "session="+strings.Repeat("x", 8193))
+		}
+		return r
+	}
+	page, err := s.Read(context.Background(), []byte("SYNTHETIC_ROOT"), q.AccountRef, q, "")
+	if code(err) != "UPSTREAM_CHANGED" || len(page.Rows) != 0 || f.balances != 1 {
+		t.Fatal("rejected business cookies still produced a balance", err)
+	}
+}
+
 func code(err error) string {
 	if err == nil {
 		return ""

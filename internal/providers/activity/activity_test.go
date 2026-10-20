@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -91,6 +92,20 @@ func service(t *testing.T) (*Service, *fake, contracts.CampusQuery) {
 	return &Service{Portal: f, Auth: f}, f, contracts.CampusQuery{AccountRef: "activity:user:SYNTHETIC_USER", ResourceRef: Resource, View: View, Limit: 1}
 }
 
+func TestLoginRejectsCookieCapacityBeforeTokenExchange(t *testing.T) {
+	s, f, _ := service(t)
+	f.alter = func(u *url.URL, r transport.Reply) transport.Reply {
+		if u.Path == "/jaccount/jalogin" {
+			r.Header.Add("Set-Cookie", "session="+strings.Repeat("x", 8193))
+		}
+		return r
+	}
+	account, err := s.Identity(context.Background(), []byte("SYNTHETIC_ROOT"))
+	if err == nil || account != "" || len(f.calls) != 3 {
+		t.Fatal("rejected login reached token exchange or returned identity", err)
+	}
+}
+
 func TestIdentityProjectionAndPagination(t *testing.T) {
 	s, f, q := service(t)
 	account, e := s.Identity(context.Background(), []byte("SYNTHETIC_ROOT"))
@@ -153,7 +168,7 @@ func TestClosedEndpointsAndAuthFailures(t *testing.T) {
 					r.Body = []byte(`{"code":200,"data":"https://evil.invalid/login"}`)
 				case endpoint == "login_redirect" && initialAuthorize(u):
 					r.Header.Set("Location", strings.Replace(jaLogin, "jaoauth220160718", "WRONG_PORTAL", 1))
-				case endpoint == "ticket_redirect" && ticketAuthorize(u):
+				case endpoint == "ticket_redirect" && sso.TicketAuthorize(u):
 					r.Header.Set("Location", "https://evil.invalid/auth?code=MUST_NOT_REQUEST")
 				case endpoint == "profile" && u.Path == "/api/v1/profile":
 					r.Body = []byte(`{"code":200,"data":{"name":"NO_STABLE_ID"}}`)
@@ -213,7 +228,7 @@ func TestAuthenticationErrorsDoNotExposeUpstreamSecrets(t *testing.T) {
 				if endpoint == "token" && u.Path == "/api/v1/login/token" {
 					r.Body = []byte(`{"code":200,"data":"MUST_NOT_RETURN\r\nTOKEN"}`)
 				}
-				if endpoint == "callback" && ticketAuthorize(u) {
+				if endpoint == "callback" && sso.TicketAuthorize(u) {
 					r.Header.Set("Location", callback+"?code=MUST_NOT_RETURN&returl=https://evil.invalid")
 				}
 				return r

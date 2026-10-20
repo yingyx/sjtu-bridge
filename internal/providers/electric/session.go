@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"strings"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/auth"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -33,24 +33,11 @@ func New() (*Service, func()) {
 	return &Service{Portal: p, Auth: a}, func() { p.Close(); a.Close() }
 }
 
-func values(u *url.URL, maximum int) (url.Values, bool) {
-	q, e := url.ParseQuery(u.RawQuery)
-	if e != nil || u.ForceQuery || len(q) > maximum {
-		return nil, false
-	}
-	for _, v := range q {
-		if len(v) != 1 || v[0] == "" || len(v[0]) > 4096 || strings.ContainsAny(v[0], "\x00\r\n") {
-			return nil, false
-		}
-	}
-	return q, true
-}
-
 func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) {
 		return false
 	}
-	q, ok := values(u, 2)
+	q, ok := sso.Values(u, 2)
 	if !ok {
 		return false
 	}
@@ -67,44 +54,12 @@ func initialAuthorize(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/oauth2/authorize" {
 		return false
 	}
-	q, ok := values(u, 5)
+	q, ok := sso.Values(u, 5)
 	return ok && len(q) == 5 && q.Get("client_id") == clientID && q.Get("scope") == "basic essential" && q.Get("response_type") == "code" && q.Get("redirect_uri") == rootURL && q.Get("state") != ""
 }
 
-func loginURL(u *url.URL) bool {
-	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/jaccount/jalogin" {
-		return false
-	}
-	q, ok := values(u, 5)
-	if !ok || q.Get("sid") != "jaoauth220160718" || q.Get("client") == "" || q.Get("returl") == "" || q.Get("se") == "" {
-		return false
-	}
-	for k := range q {
-		if k != "sid" && k != "client" && k != "returl" && k != "se" && k != "v" {
-			return false
-		}
-	}
-	return true
-}
-
-func ticketAuthorize(u *url.URL) bool {
-	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/oauth2/authorize" {
-		return false
-	}
-	q, ok := values(u, 3)
-	if !ok || q.Get("context") == "" || q.Get("jatkt") == "" {
-		return false
-	}
-	for k := range q {
-		if k != "context" && k != "jatkt" && k != "state" {
-			return false
-		}
-	}
-	return true
-}
-
 func AuthAllowed(u *url.URL) bool {
-	return initialAuthorize(u) || loginURL(u) || ticketAuthorize(u)
+	return initialAuthorize(u) || sso.OAuthLogin(u) || sso.TicketAuthorize(u)
 }
 
 type session struct {
@@ -114,27 +69,10 @@ type session struct {
 }
 
 func (s *session) header(u *url.URL) http.Header {
-	h := http.Header{"Accept": {"application/json"}, "X-Requested-With": {"XMLHttpRequest"}}
-	if s.ua != "" {
-		h.Set("User-Agent", s.ua)
-	}
-	r := http.Request{Header: h}
-	for _, c := range s.jar.Cookies(u) {
-		if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" {
-			r.AddCookie(c)
-		}
-	}
-	return r.Header
-}
-
-func (s *session) remember(u *url.URL, r transport.Reply) {
-	accepted := []*http.Cookie{}
-	for _, c := range (&http.Response{Header: r.Header}).Cookies() {
-		if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" && (c.Domain == "" || strings.TrimPrefix(c.Domain, ".") == u.Host) {
-			accepted = append(accepted, c)
-		}
-	}
-	s.jar.SetCookies(u, accepted)
+	h := sso.Header(s.jar, u, s.ua)
+	h.Set("Accept", "application/json")
+	h.Set("X-Requested-With", "XMLHttpRequest")
+	return h
 }
 
 func (s *session) get(ctx context.Context, raw string) (transport.Reply, error) {
@@ -144,7 +82,7 @@ func (s *session) get(ctx context.Context, raw string) (transport.Reply, error) 
 	}
 	r, e := s.service.Portal.Get(ctx, u, s.header(u))
 	if e == nil {
-		s.remember(u, r)
+		e = sso.Remember(s.jar, u, r.Header)
 	}
 	return r, e
 }
@@ -157,7 +95,8 @@ func (s *Service) login(ctx context.Context, secret []byte) (*session, error) {
 	jar, _ := cookiejar.New(nil)
 	x := &session{service: s, jar: jar, ua: credential.UserAgent}
 	u, _ := url.Parse(rootURL)
-	state, phase, total := "", "start", 0
+	state, phase := "", "start"
+	budget := sso.Budget{Limit: transport.MaxBody}
 	for hop := 0; hop < 8; hop++ {
 		if e := ctx.Err(); e != nil {
 			return nil, e
@@ -171,38 +110,32 @@ func (s *Service) login(ctx context.Context, secret []byte) (*session, error) {
 			h.Del("X-Requested-With")
 			h.Set("Accept", "text/html")
 			if phase == "login" {
-				r := http.Request{Header: h}
-				r.AddCookie(&http.Cookie{Name: "JAAuthCookie", Value: credential.JAAuthCookie})
-				if credential.JATrustCookie != "" {
-					r.AddCookie(&http.Cookie{Name: "JATrustCookie", Value: credential.JATrustCookie})
+				if e = sso.AddRoots(h, u, credential); e != nil {
+					return nil, e
 				}
-				h = r.Header
 			}
 		}
 		r, e := client.Get(ctx, u, h)
 		if e != nil {
 			return nil, e
 		}
-		total += len(r.Body)
-		if total > transport.MaxBody {
+		if !budget.Consume(len(r.Body)) {
 			return nil, contracts.Fail("RESPONSE_TOO_LARGE", "Electricity authentication exceeded response budget")
 		}
-		x.remember(u, r)
+		if e = sso.Remember(jar, u, r.Header); e != nil {
+			return nil, e
+		}
 		if r.Status >= 300 && r.Status < 400 {
-			if len(r.Header.Values("Location")) != 1 {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid electricity login redirect")
-			}
-			ref, e := url.Parse(r.Header.Get("Location"))
+			next, e := sso.Redirect(r, u)
 			if e != nil {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid electricity login redirect")
+				return nil, e
 			}
-			next := u.ResolveReference(ref)
 			switch {
 			case phase == "start" && initialAuthorize(next):
 				state, phase = next.Query().Get("state"), "authorize"
-			case phase == "authorize" && loginURL(next):
+			case phase == "authorize" && sso.OAuthLogin(next):
 				phase = "login"
-			case (phase == "login" || phase == "ticket") && ticketAuthorize(next):
+			case (phase == "login" || phase == "ticket") && sso.TicketAuthorize(next):
 				phase = "ticket"
 			case (phase == "login" || phase == "ticket") && Allowed(next) && next.Path == "/" && next.Query().Get("code") != "" && next.Query().Get("state") == state:
 				phase = "callback"

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -82,7 +83,7 @@ func describeRedirect(d *Diagnostic, u *url.URL) {
 		d.RedirectShape = "unreviewed_url"
 		return
 	}
-	q, ok := oneQuery(u)
+	q, ok := sso.Values(u, 5)
 	if !ok {
 		d.RedirectShape = "invalid_query"
 		return

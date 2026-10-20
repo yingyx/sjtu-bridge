@@ -12,6 +12,7 @@ import (
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/auth"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -33,29 +34,16 @@ func AuthAllowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") {
 		return false
 	}
-	q, e := url.ParseQuery(u.RawQuery)
-	if e != nil || len(q) > 6 {
+	q, ok := sso.Values(u, 6)
+	if !ok {
 		return false
-	}
-	for _, v := range q {
-		if len(v) != 1 || v[0] == "" || len(v[0]) > 4096 {
-			return false
-		}
 	}
 	switch u.Path {
 	case "/oauth2/authorize":
 		if q.Get("client_id") != "" {
 			return len(q) == 4 && q.Get("client_id") == "MVJGw8u0bzoMJVbfb4Fk" && q.Get("response_type") == "code" && q.Get("scope") == "essential" && q.Get("redirect_uri") == "http://i.sjtu.edu.cn/jaccountlogin"
 		}
-		if q.Get("context") == "" || q.Get("jatkt") == "" {
-			return false
-		}
-		for k := range q {
-			if k != "context" && k != "jatkt" && k != "state" {
-				return false
-			}
-		}
-		return true
+		return sso.TicketAuthorize(u)
 	case "/jaccount/jalogin":
 		if q.Get("sid") != "jaoauth220160718" && q.Get("sid") != "jasjtumail" {
 			return false
@@ -81,16 +69,16 @@ func portalLoginAllowed(u *url.URL, host string) bool {
 	if !transport.ExactHTTPS(u, host) {
 		return false
 	}
-	q, e := url.ParseQuery(u.RawQuery)
-	if e != nil {
+	q, ok := sso.Values(u, 5)
+	if !ok {
 		return false
 	}
 	if host == "mail.sjtu.edu.cn" && (u.Path == "/service/preauth" || u.Path == "/service/preauth/") {
 		if len(q) != 5 {
 			return false
 		}
-		for k, v := range q {
-			if len(v) != 1 || (k != "account" && k != "by" && k != "expires" && k != "timestamp" && k != "preauth") {
+		for k := range q {
+			if k != "account" && k != "by" && k != "expires" && k != "timestamp" && k != "preauth" {
 				return false
 			}
 		}
@@ -99,8 +87,8 @@ func portalLoginAllowed(u *url.URL, host string) bool {
 	if len(q) > 2 {
 		return false
 	}
-	for k, v := range q {
-		if len(v) != 1 || v[0] == "" || len(v[0]) > 4096 || (k != "code" && k != "state" && k != "jatkt") {
+	for k := range q {
+		if k != "code" && k != "state" && k != "jatkt" {
 			return false
 		}
 	}
@@ -127,7 +115,7 @@ func (s Service) Login(ctx context.Context, secret []byte) (*Session, error) {
 	if e != nil || !portalLoginAllowed(u, s.Host) {
 		return nil, contracts.Fail("PERMISSION_DENIED", "Unsupported portal login")
 	}
-	total := 0
+	budget := sso.Budget{Limit: transport.MaxBody}
 	for hop := 0; hop < 8; hop++ {
 		client := s.Portal
 		isAuth := u.Host == "jaccount.sjtu.edu.cn"
@@ -145,43 +133,26 @@ func (s Service) Login(ctx context.Context, secret []byte) (*Session, error) {
 		}
 		h := session.Header(u)
 		h.Set("Accept", "text/html,application/json")
-		if isAuth {
-			r := http.Request{Header: h}
-			// Imported roots belong to jAccount's /jaccount path, not OAuth
-			// endpoints or portal business requests.
-			if strings.HasPrefix(u.Path, "/jaccount/") {
-				r.AddCookie(&http.Cookie{Name: "JAAuthCookie", Value: credential.JAAuthCookie})
-				if credential.JATrustCookie != "" {
-					r.AddCookie(&http.Cookie{Name: "JATrustCookie", Value: credential.JATrustCookie})
-				}
+		if isAuth && strings.HasPrefix(u.Path, "/jaccount/") {
+			if e = sso.AddRoots(h, u, credential); e != nil {
+				return nil, e
 			}
-			h = r.Header
 		}
 		reply, e := client.Get(ctx, u, h)
 		if e != nil {
 			return nil, e
 		}
-		total += len(reply.Body)
-		if total > transport.MaxBody {
+		if !budget.Consume(len(reply.Body)) {
 			return nil, contracts.Fail("RESPONSE_TOO_LARGE", "SSO exceeded response budget")
 		}
-		cookies := (&http.Response{Header: reply.Header}).Cookies()
-		accepted := []*http.Cookie{}
-		for _, c := range cookies {
-			if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" && (c.Domain == "" || strings.TrimPrefix(c.Domain, ".") == u.Host) {
-				accepted = append(accepted, c)
-			}
+		if e = sso.Remember(jar, u, reply.Header); e != nil {
+			return nil, e
 		}
-		jar.SetCookies(u, accepted)
 		if reply.Status >= 300 && reply.Status < 400 {
-			if len(reply.Header.Values("Location")) != 1 {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid portal redirect")
-			}
-			ref, e := url.Parse(reply.Header.Get("Location"))
+			next, e := sso.Redirect(reply, u)
 			if e != nil {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid portal redirect")
+				return nil, e
 			}
-			next := u.ResolveReference(ref)
 			// Known first-party applications advertise HTTP callbacks. Send tickets
 			// only over HTTPS, to the exact reviewed callback; never contact HTTP.
 			if next.Scheme == "http" && next.Host == s.Host {
@@ -227,17 +198,7 @@ func (s Service) Login(ctx context.Context, secret []byte) (*Session, error) {
 	return nil, contracts.Fail("AUTH_REQUIRED", "Portal exceeded SSO hop limit")
 }
 func (s *Session) Header(u *url.URL) http.Header {
-	h := http.Header{}
-	if s.userAgent != "" {
-		h.Set("User-Agent", s.userAgent)
-	}
-	r := http.Request{Header: h}
-	for _, c := range s.jar.Cookies(u) {
-		if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" {
-			r.AddCookie(c)
-		}
-	}
-	return h
+	return sso.Header(s.jar, u, s.userAgent)
 }
 func (s *Session) Cookie(name string) string {
 	u, _ := url.Parse("https://" + s.service.Host + "/")
@@ -257,13 +218,7 @@ func (s *Session) Get(ctx context.Context, raw string) (transport.Reply, error) 
 	}
 	r, e := s.service.Portal.Get(ctx, u, s.Header(u))
 	if e == nil {
-		accepted := []*http.Cookie{}
-		for _, c := range (&http.Response{Header: r.Header}).Cookies() {
-			if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" && (c.Domain == "" || strings.TrimPrefix(c.Domain, ".") == u.Host) {
-				accepted = append(accepted, c)
-			}
-		}
-		s.jar.SetCookies(u, accepted)
+		e = sso.Remember(s.jar, u, r.Header)
 	}
 	return r, e
 }

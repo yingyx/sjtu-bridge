@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/yingyx/sjtu-bridge/contracts"
-	"github.com/yingyx/sjtu-bridge/internal/auth"
-	"github.com/yingyx/sjtu-bridge/internal/transport"
 	"io"
 	"mime"
 	"net/http"
@@ -15,63 +12,23 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-)
 
-func values(u *url.URL, maximum int) (url.Values, bool) {
-	q, e := url.ParseQuery(u.RawQuery)
-	if e != nil || len(q) > maximum {
-		return nil, false
-	}
-	for _, v := range q {
-		if len(v) != 1 || v[0] == "" || len(v[0]) > 4096 || strings.ContainsAny(v[0], "\x00\r\n") {
-			return nil, false
-		}
-	}
-	return q, true
-}
+	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/auth"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
+	"github.com/yingyx/sjtu-bridge/internal/transport"
+)
 
 func initialAuthorize(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/oauth2/authorize" {
 		return false
 	}
-	q, ok := values(u, 4)
+	q, ok := sso.Values(u, 4)
 	return ok && len(q) == 4 && q.Get("client_id") == clientID && q.Get("redirect_uri") == callback && q.Get("response_type") == "code" && q.Get("scope") == "profile"
 }
 
-func ticketAuthorize(u *url.URL) bool {
-	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/oauth2/authorize" {
-		return false
-	}
-	q, ok := values(u, 3)
-	if !ok || q.Get("context") == "" || q.Get("jatkt") == "" {
-		return false
-	}
-	for k := range q {
-		if k != "context" && k != "jatkt" && k != "state" {
-			return false
-		}
-	}
-	return true
-}
-
-func loginURL(u *url.URL) bool {
-	if !transport.ExactHTTPS(u, "jaccount.sjtu.edu.cn") || u.Path != "/jaccount/jalogin" {
-		return false
-	}
-	q, ok := values(u, 5)
-	if !ok || q.Get("sid") != "jaoauth220160718" || q.Get("client") == "" || q.Get("returl") == "" || q.Get("se") == "" {
-		return false
-	}
-	for k := range q {
-		if k != "sid" && k != "client" && k != "returl" && k != "se" && k != "v" {
-			return false
-		}
-	}
-	return true
-}
-
 func AuthAllowed(u *url.URL) bool {
-	return initialAuthorize(u) || ticketAuthorize(u) || loginURL(u)
+	return initialAuthorize(u) || sso.TicketAuthorize(u) || sso.OAuthLogin(u)
 }
 
 type envelope struct {
@@ -157,24 +114,10 @@ func get(ctx context.Context, c HTTP, raw string, h http.Header) (transport.Repl
 }
 
 func redirect(r transport.Reply, from *url.URL) (*url.URL, error) {
-	if r.Status < 300 || r.Status >= 400 || len(r.Header.Values("Location")) != 1 {
+	if r.Status < 300 || r.Status >= 400 {
 		return nil, contracts.Fail("AUTH_REQUIRED", "Activity authentication requires interactive sign-in")
 	}
-	ref, e := url.Parse(r.Header.Get("Location"))
-	if e != nil {
-		return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid activity authentication redirect")
-	}
-	return from.ResolveReference(ref), nil
-}
-
-func sessionCookies(jar http.CookieJar, u *url.URL, r transport.Reply) {
-	accepted := []*http.Cookie{}
-	for _, c := range (&http.Response{Header: r.Header}).Cookies() {
-		if c.Name != "JAAuthCookie" && c.Name != "JATrustCookie" && (c.Domain == "" || strings.TrimPrefix(c.Domain, ".") == u.Host) {
-			accepted = append(accepted, c)
-		}
-	}
-	jar.SetCookies(u, accepted)
+	return sso.Redirect(r, from)
 }
 
 var bearer = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+={0,2}$`)
@@ -210,57 +153,55 @@ func (s *Service) login(ctx context.Context, secret []byte) (http.Header, string
 	}
 	jar, _ := cookiejar.New(nil)
 	authHeaders := func(target *url.URL) http.Header {
-		a := http.Header{"Accept": {"text/html"}}
-		if c.UserAgent != "" {
-			a.Set("User-Agent", c.UserAgent)
-		}
-		req := http.Request{Header: a}
-		for _, cookie := range jar.Cookies(target) {
-			req.AddCookie(cookie)
-		}
-		return req.Header
+		a := sso.Header(jar, target, c.UserAgent)
+		a.Set("Accept", "text/html")
+		return a
 	}
 	r, e = s.Auth.Get(ctx, u, authHeaders(u))
 	if e != nil {
 		return nil, "", e
 	}
-	budget := len(r.Body)
-	sessionCookies(jar, u, r)
+	budget := sso.Budget{Limit: transport.MaxBody}
+	if !budget.Consume(len(r.Body)) {
+		return nil, "", contracts.Fail("RESPONSE_TOO_LARGE", "Activity authentication exceeded response budget")
+	}
+	if e = sso.Remember(jar, u, r.Header); e != nil {
+		return nil, "", e
+	}
 	login, e := redirect(r, u)
-	if e != nil || !loginURL(login) {
+	if e != nil || !sso.OAuthLogin(login) {
 		return nil, "", contracts.Fail("AUTH_REQUIRED", "Activity login left the reviewed OAuth flow")
 	}
 	a := authHeaders(login)
-	req := http.Request{Header: a}
-	req.AddCookie(&http.Cookie{Name: "JAAuthCookie", Value: c.JAAuthCookie})
-	if c.JATrustCookie != "" {
-		req.AddCookie(&http.Cookie{Name: "JATrustCookie", Value: c.JATrustCookie})
+	if e = sso.AddRoots(a, login, c); e != nil {
+		return nil, "", e
 	}
 	u = login
-	r, e = s.Auth.Get(ctx, u, req.Header)
+	r, e = s.Auth.Get(ctx, u, a)
 	if e != nil {
 		return nil, "", e
 	}
-	budget += len(r.Body)
 	code := ""
 	for hop := 0; hop < 6; hop++ {
-		if budget > transport.MaxBody {
+		if !budget.Consume(len(r.Body)) {
 			return nil, "", contracts.Fail("RESPONSE_TOO_LARGE", "Activity authentication exceeded response budget")
 		}
-		sessionCookies(jar, u, r)
+		if e = sso.Remember(jar, u, r.Header); e != nil {
+			return nil, "", e
+		}
 		next, e := redirect(r, u)
 		if e != nil {
 			return nil, "", e
 		}
 		if transport.ExactHTTPS(next, Host) && next.Path == "/auth" {
-			q, ok := values(next, 1)
+			q, ok := sso.Values(next, 1)
 			if !ok || len(q) != 1 || q.Get("code") == "" {
 				return nil, "", contracts.Fail("AUTH_REQUIRED", "Unreviewed activity callback parameters")
 			}
 			code = q.Get("code")
 			break
 		}
-		if !ticketAuthorize(next) {
+		if !sso.TicketAuthorize(next) {
 			return nil, "", contracts.Fail("AUTH_REQUIRED", "Activity authentication left the reviewed callback flow")
 		}
 		u = next
@@ -268,7 +209,6 @@ func (s *Service) login(ctx context.Context, secret []byte) (http.Header, string
 		if e != nil {
 			return nil, "", e
 		}
-		budget += len(r.Body)
 	}
 	if code == "" {
 		return nil, "", contracts.Fail("AUTH_REQUIRED", "Activity authentication exceeded hop limit")

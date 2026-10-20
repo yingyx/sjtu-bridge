@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/auth"
+	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -69,47 +71,33 @@ func Check(ctx context.Context, client Getter, secret []byte) (contracts.Session
 	defer cancel()
 	jar, _ := cookiejar.New(nil)
 	u, _ := url.Parse("https://" + Host + "/profile/jaccount?returnUrl=%2F%23%2F")
-	total := 0
+	budget := sso.Budget{Limit: transport.MaxBody}
 	for hop := 0; hop < 8; hop++ {
 		if !Allowed(u) {
 			return contracts.SessionCheck{}, contracts.Fail("AUTH_REQUIRED", "jAccount requires an unsupported sign-in step")
 		}
-		req := &http.Request{Header: make(http.Header)}
-		for _, cookie := range jar.Cookies(u) {
-			if cookie.Name != "JAAuthCookie" {
-				req.AddCookie(cookie)
+		h := sso.Header(jar, u, "")
+		h.Set("Accept", "text/html,application/json")
+		if u.Path == "/jaccount/jalogin" {
+			if err := sso.AddRoots(h, u, auth.CampusCredential{JAAuthCookie: string(secret)}); err != nil {
+				return contracts.SessionCheck{}, err
 			}
 		}
-		// The root secret is sent only to the reviewed jAccount authentication path.
-		if u.Path == "/jaccount/jalogin" {
-			req.AddCookie(&http.Cookie{Name: "JAAuthCookie", Value: string(secret)})
-		}
-		req.Header.Set("Accept", "text/html,application/json")
-		r, err := client.Get(ctx, u, req.Header)
+		r, err := client.Get(ctx, u, h)
 		if err != nil {
 			return contracts.SessionCheck{}, err
 		}
-		total += len(r.Body)
-		if total > transport.MaxBody {
+		if !budget.Consume(len(r.Body)) {
 			return contracts.SessionCheck{}, contracts.Fail("RESPONSE_TOO_LARGE", "SSO exchange exceeded total response budget")
 		}
-		response := &http.Response{Header: r.Header}
-		accepted := []*http.Cookie{}
-		for _, cookie := range response.Cookies() {
-			if cookie.Name != "JAAuthCookie" && (cookie.Domain == "" || strings.TrimPrefix(cookie.Domain, ".") == Host) {
-				accepted = append(accepted, cookie)
-			}
+		if err := sso.Remember(jar, u, r.Header); err != nil {
+			return contracts.SessionCheck{}, err
 		}
-		jar.SetCookies(u, accepted)
 		if r.Status == 301 || r.Status == 302 || r.Status == 303 || r.Status == 307 || r.Status == 308 {
-			if len(r.Header.Values("Location")) != 1 {
-				return contracts.SessionCheck{}, contracts.Fail("UPSTREAM_CHANGED", "Invalid SSO redirect")
-			}
-			ref, err := url.Parse(r.Header.Get("Location"))
+			next, err := sso.Redirect(r, u)
 			if err != nil {
-				return contracts.SessionCheck{}, contracts.Fail("UPSTREAM_CHANGED", "Invalid SSO redirect")
+				return contracts.SessionCheck{}, err
 			}
-			next := u.ResolveReference(ref)
 			// The official landing URL contains a client-side route, never sent on wire.
 			if next.Path == "/profile/" && next.Fragment == "/" {
 				next.Fragment = ""
@@ -129,21 +117,16 @@ func Check(ctx context.Context, client Getter, secret []byte) (contracts.Session
 		// Reaching a landing page is not authentication. Verify using the exact
 		// endpoint used by the official SPA; never return its session-token data.
 		current, _ := url.Parse("https://" + Host + "/profile/current")
-		h := http.Header{"Accept": {"application/json"}}
-		req = &http.Request{Header: h}
-		for _, cookie := range jar.Cookies(current) {
-			if cookie.Name != "JAAuthCookie" {
-				req.AddCookie(cookie)
-			}
-		}
-		state, err := client.Get(ctx, current, req.Header)
+		h = sso.Header(jar, current, "")
+		h.Set("Accept", "application/json")
+		state, err := client.Get(ctx, current, h)
 		if err != nil {
 			return contracts.SessionCheck{}, err
 		}
 		if err := transport.Status(state.Status); err != nil {
 			return contracts.SessionCheck{}, err
 		}
-		if total+len(state.Body) > transport.MaxBody {
+		if !budget.Consume(len(state.Body)) {
 			return contracts.SessionCheck{}, contracts.Fail("RESPONSE_TOO_LARGE", "SSO exchange exceeded total response budget")
 		}
 		return parseCurrent(state)
