@@ -20,17 +20,34 @@ type ListInput struct {
 	Cursor    string `json:"cursor,omitempty" jsonschema:"Opaque continuation from the same capability and limit; expires after 15 minutes"`
 	Query     string `json:"query,omitempty" jsonschema:"Keywords matched against recent RSS titles and summaries only"`
 	CanteenID string `json:"canteen_id,omitempty" jsonschema:"Reviewed parent canteen ID returned by life.dining.list"`
+	Day       string `json:"day,omitempty" jsonschema:"Source dining series: today, yesterday or both (default both)"`
+	ItemID    string `json:"item_id,omitempty" jsonschema:"Official object ID returned by the corresponding list capability"`
 }
 
 type Item struct {
-	Provider      string        `json:"provider"`
-	AccountRef    string        `json:"account_ref,omitempty"`
-	SourceID      string        `json:"source_id"`
-	Title         string        `json:"title"`
-	URL           string        `json:"url"`
-	PublishedDate *string       `json:"published_date"`
-	Navigation    *Navigation   `json:"navigation,omitempty"`
-	Fields        []PublicField `json:"fields,omitempty"`
+	Provider      string         `json:"provider"`
+	AccountRef    string         `json:"account_ref,omitempty"`
+	SourceID      string         `json:"source_id"`
+	Title         string         `json:"title"`
+	URL           string         `json:"url"`
+	PublishedDate *string        `json:"published_date"`
+	Navigation    *Navigation    `json:"navigation,omitempty"`
+	Fields        []PublicField  `json:"fields,omitempty"`
+	Content       *PublicContent `json:"content,omitempty"`
+}
+
+// PublicContent preserves bounded source prose and public reference links.
+// Links are metadata, never an instruction to fetch attachments or execute actions.
+type PublicContent struct {
+	Text      string       `json:"text"`
+	Links     []PublicLink `json:"links"`
+	Truncated bool         `json:"truncated"`
+}
+
+type PublicLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Kind  string `json:"kind"`
 }
 
 // SessionCheck deliberately contains no identity, token, Cookie or SSO URL.

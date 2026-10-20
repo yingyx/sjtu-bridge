@@ -1,4 +1,4 @@
-// Package campuspublic reads seven reviewed anonymous public pages. It never
+// Package campuspublic reads reviewed anonymous public pages. It never
 // accepts a destination, header, credential, or script from a caller.
 package campuspublic
 
@@ -24,12 +24,13 @@ import (
 type source struct{ URL, Scope string }
 
 var sources = map[string]source{
-	"library.borrowing.list":    {"https://www.lib.sjtu.edu.cn/fresh/xinsheng.html", "仅新生指南借阅规则表；不是个人借阅记录或已核验的今日适用规则。"},
-	"life.health.list":          {"https://hospital.sjtu.edu.cn/web/index", "仅校医院首页公告；不含公告正文、历史归档或个人健康数据。"},
-	"development.notices.list":  {"https://youth.sjtu.edu.cn/tzgg.html", "仅团委通知公告第一页；不含历史页、第二课堂活动库或实时报名状态。"},
+	"library.borrowing.list":    {"https://www.lib.sjtu.edu.cn/fresh/xinsheng.html", "新生指南与固定正式借阅规则；不是个人借阅记录。"},
+	"life.health.list":          {"https://hospital.sjtu.edu.cn/web/news/xxfbtzgg", "校医院通知公告归档；不含个人健康数据。"},
+	"development.notices.list":  {"https://youth.sjtu.edu.cn/tzgg.html", "团委通知公告归档；不含第二课堂活动库或实时报名状态。"},
 	"research.hardware.list":    {"https://docs.hpc.sjtu.edu.cn/system/computesystem.html", "仅官方文档发布的计算队列硬件表；不代表实时空闲资源、可用节点或排队状态。"},
-	"administration.fees.list":  {"https://www.jdcw.sjtu.edu.cn/", "仅财务首页信息公开栏的收费及学费公示索引；不含金额、附件、正文或个人账单。"},
+	"administration.fees.list":  {feeArchive, "财务信息公示归档中的收费及学费记录；不含个人账单。"},
 	"digital.support.list":      {"https://nimo.sjtu.edu.cn/wiki/user-manual-2024/contact-us/", "仅 NIMO 页面公布的宿舍网管联系方式与值班安排；节假日等调整需核对站内通知，不代表当前在岗。"},
+	"digital.software.list":     {"https://software.sjtu.edu.cn/List/rjlb", "仅正版软件授权中心公开目录的名称、分类、简介与详情入口；不含下载、激活、授权码、许可接受或个人使用资格，目录描述不保证版本和授权持续有效。"},
 	"campus.organizations.list": {"https://www.sjtu.edu.cn/jgsz/index.html", "仅官网机构设置页可链接的机构；保留源站链接，不探测各机构网站。"},
 }
 
@@ -44,17 +45,30 @@ type Provider struct {
 func allowed(raw string) func(*url.URL) bool {
 	expected, _ := url.Parse(raw)
 	return func(u *url.URL) bool {
-		return transport.ExactHTTPS(u, expected.Host) && u.Path == expected.Path && u.RawQuery == "" && !u.ForceQuery
+		return transport.ExactHTTPS(u, expected.Host) && u.String() == raw
 	}
 }
 func New() *Provider {
 	p := &Provider{clients: map[string]Fetcher{}}
 	for id, s := range sources {
 		u, _ := url.Parse(s.URL)
-		c := transport.NewSecure(u.Host, allowed(s.URL))
+		predicate := allowed(s.URL)
+		switch id {
+		case "life.health.list", "development.notices.list":
+			predicate = func(target *url.URL) bool { return noticeAllowed(id, target) }
+		case feeListID:
+			predicate = feeAllowed
+		}
+		c := transport.NewSecure(u.Host, predicate)
 		p.clients[id] = c
 		p.close = append(p.close, c.Close)
 	}
+	// This is a second fixed source of the borrowing task, not a new public
+	// capability or a caller-selected URL.
+	u, _ := url.Parse(borrowingRulesURL)
+	rules := transport.NewSecure(u.Host, allowed(borrowingRulesURL))
+	p.clients["library.borrowing.rules"] = rules
+	p.close = append(p.close, rules.Close)
 	return p
 }
 func (p *Provider) Close() {
@@ -73,12 +87,27 @@ type cursor struct {
 }
 
 func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) (contracts.Response, error) {
+	switch id {
+	case "library.borrowing.list":
+		return p.listBorrowing(ctx, in)
+	case "life.health.list", "development.notices.list":
+		return p.listNotices(ctx, id, in)
+	case "life.health.get", "development.notices.get":
+		return p.getNotice(ctx, id, in)
+	case feeListID:
+		return p.listFees(ctx, id, in)
+	case "administration.fees.get":
+		return p.getFee(ctx, id, in)
+	}
 	s, ok := sources[id]
 	if !ok {
 		return contracts.Response{}, contracts.Fail("UNSUPPORTED", "Unknown public query")
 	}
 	if in.Limit < 1 || in.Limit > 100 {
 		return contracts.Response{}, contracts.Fail("INVALID_ARGUMENT", "Limit must be 1-100")
+	}
+	if in.ItemID != "" || in.CanteenID != "" || in.Day != "" || in.Query != "" {
+		return contracts.Response{}, contracts.Fail("INVALID_ARGUMENT", "Unsupported source-page filter")
 	}
 	c := cursor{Version: 1, ID: id, Limit: in.Limit, Expires: time.Now().Add(15 * time.Minute).Unix()}
 	if in.Cursor != "" {

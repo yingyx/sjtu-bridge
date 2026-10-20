@@ -21,11 +21,12 @@ type sample struct {
 	Time string   `json:"time"`
 }
 type area struct {
-	ID    int             `json:"id"`
-	Name  string          `json:"name"`
-	Open  *int            `json:"isOpen"`
-	Close string          `json:"closeDesc"`
-	Rates json.RawMessage `json:"curRates"`
+	ID        int             `json:"id"`
+	Name      string          `json:"name"`
+	Open      *int            `json:"isOpen"`
+	Close     string          `json:"closeDesc"`
+	Rates     json.RawMessage `json:"curRates"`
+	Yesterday json.RawMessage `json:"ydaRates"`
 }
 
 func field(key, label, value string) contracts.PublicField {
@@ -109,8 +110,13 @@ func parseSub(body []byte, parent string, now time.Time) ([]contracts.Item, bool
 		var rate *float64
 		for _, s := range samples {
 			at, e := time.ParseInLocation("2006-01-02 15:04:05", s.Time, time.FixedZone("Asia/Shanghai", 8*60*60))
-			if e != nil || !validRate(s.Rate) || at.After(now.Add(5*time.Minute)) {
+			if e != nil || !validRate(s.Rate) || (at.After(now.Add(5*time.Minute)) && *s.Rate != 0) {
 				return nil, false, crowdError()
+			}
+			// The chart may include zero placeholders for the remainder of its
+			// meal window. These are not current observations.
+			if at.After(now) {
+				continue
 			}
 			if at.After(latest) {
 				latest, rate = at, s.Rate

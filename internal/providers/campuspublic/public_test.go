@@ -22,15 +22,74 @@ func table(headers []string, rows ...[]string) string {
 	}
 	return s + "</table>"
 }
+func softwareCard(title, path string) string {
+	return `<div class="all-li"><a href="` + path + `"><img src="/Assets/example.png"><div class="li-tt"><h4>` + title + `</h4><span>示例分类</span><p>来源目录简介，不能据此判断使用资格。</p></div></a></div>`
+}
 func fixtures() map[string]string {
 	return map[string]string{
-		"library.borrowing.list":    table([]string{"读者类型", "借阅册数", "外借周期", "续借次数", "续借周期", "预约册数", "权限"}, []string{"示例学生", "9", "21天", "2", "14天", "3", "借阅"}),
 		"digital.support.list":      table([]string{"校区", "值班时间", "办公室地址", "办公室电话"}, []string{"测试校区", "周二 10:00", "示例楼", "00000000"}, []string{"第二校区", "周三 11:00", "示例二楼", "00000001"}),
+		"digital.software.list":     softwareCard("示例软件甲", "/List/ExampleA/v1") + softwareCard("示例软件乙", "https://software.sjtu.edu.cn/List/View/123"),
 		"research.hardware.list":    table([]string{"队列", "架构", "参数", "节点数量"}, []string{"test-cpu", "x86", "CPU: synthetic; Mem: 8GB", "3"}) + table([]string{"队列", "参数", "节点数量"}, []string{"test-gpu", "GPU: synthetic", "2"}),
-		"life.health.list":          `<div class="announcement_list_item" onclick='windowOpen("\/web\/news\/view\/xxfbtzgg\/123")'><div class="announcement_list_item_left"><p>10-01</p><p>2026</p></div><div class="announcement_list_item_right"><p>测试体检公告</p><p>不要返回正文</p></div></div>`,
 		"development.notices.list":  `<div class="tzgg-info"><ul><li><a href="/tzgg/123.html"><div class="li-time"><p>01</p><span>2026.10</span></div><div class="li-info">测试竞赛公告</div></a></li></ul><a href="/tzgg/p2.html">下一页</a></div>`,
-		"administration.fees.list":  `<div class="dh-con"><a href="info/1011/123.htm">测试收费公示</a><a href="https://gk.sjtu.edu.cn/Data/View/1">部门决算</a><a href="info/1011/124.htm">测试学费公示</a></div>`,
 		"campus.organizations.list": `<div class="org-content"><h3 class="org-title">机关部处</h3><div class="form-inline"><div class="form-group"><label><a href="https://test.sjtu.edu.cn/">测试部门</a></label><p>挂靠：示例中心</p></div></div><h3 class="org-title">直属单位</h3><ul class="org-list"><li><a href="http://test2.sjtu.edu.cn/">测试单位</a></li><li>没有链接的单位</li></ul></div>`,
+	}
+}
+
+func TestSoftwareMetadataAndSnapshotPagination(t *testing.T) {
+	const id = "digital.software.list"
+	p, f := fake(fixtures()[id])
+	first, err := p.List(context.Background(), id, contracts.ListInput{Limit: 1})
+	if err != nil || !first.Meta.HasMore || first.Meta.NextCursor == nil || len(first.Data.Items) != 1 {
+		t.Fatal(first, err)
+	}
+	v := first.Data.Items[0]
+	if v.Title != "示例软件甲" || v.URL != "https://software.sjtu.edu.cn/List/ExampleA/v1" || len(v.Fields) != 2 || v.Fields[0].Key != "category" || v.Fields[0].Value != "示例分类" || v.Fields[1].Key != "description" || v.Navigation != nil {
+		t.Fatal(v)
+	}
+	second, err := p.List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *first.Meta.NextCursor})
+	if err != nil || second.Meta.HasMore || len(second.Data.Items) != 1 || second.Data.Items[0].Title != "示例软件乙" || f.calls != 2 || f.target != sources[id].URL {
+		t.Fatal(second, err)
+	}
+	f.reply.Body = []byte(strings.ReplaceAll(fixtures()[id], "来源目录简介", "目录内容更新"))
+	_, err = p.List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *first.Meta.NextCursor})
+	checkCode(t, err, "UPSTREAM_CHANGED")
+}
+
+func TestSoftwareRejectsUnreviewedLinksAndChangedCards(t *testing.T) {
+	const id = "digital.software.list"
+	for _, path := range []string{
+		"javascript:alert(1)", "http://software.sjtu.edu.cn/List/Test/v1", "https://evil.example/List/Test/v1",
+		"https://another.sjtu.edu.cn/List/Test/v1", "https://software.sjtu.edu.cn.evil.example/List/Test/v1",
+		"https://example@software.sjtu.edu.cn/List/Test/v1", "https://software.sjtu.edu.cn:443/List/Test/v1",
+		"/List/Test/v1?download=1", "/List/Test/v1?", "/List/Test/v1#license", "/Download/Test/v1",
+		"/List/rjlb", "/List/Test/v1/", "/List/%54est/v1", "/List/Test%2fv1", "/List/Test/v1\\other",
+		"/List/Test/../Other/v1", "/List/Test/../../List/Other/v1",
+	} {
+		t.Run(path, func(t *testing.T) {
+			p, f := fake(softwareCard("示例软件", path))
+			_, err := p.List(context.Background(), id, contracts.ListInput{Limit: 10})
+			checkCode(t, err, "UPSTREAM_CHANGED")
+			if f.calls != 1 || f.target != sources[id].URL {
+				t.Fatal("detail link was fetched")
+			}
+		})
+	}
+	good := softwareCard("示例软件", "/List/Test/v1")
+	for _, bad := range []string{
+		good + good,
+		good + softwareCard("不同名称", "/List/Test/v1"),
+		good + softwareCard("示例软件", "/List/Other/v1"),
+		strings.Replace(good, "<h4>示例软件</h4>", "<h4></h4>", 1),
+		strings.Replace(good, "<span>示例分类</span>", "", 1),
+		strings.Replace(good, "</span>", "</span><span>重复分类</span>", 1),
+		strings.Replace(good, "<p>", "<p>"+strings.Repeat("a", 4097), 1),
+		strings.Replace(good, "</a>", "<script>arbitraryCode()</script></a>", 1),
+		strings.Replace(good, "<a ", `<a onclick="arbitraryCode()" `, 1),
+		`<div class="all-li"><div class="li-tt"><h4>空壳</h4></div></div>`,
+	} {
+		p, _ := fake(bad)
+		_, err := p.List(context.Background(), id, contracts.ListInput{Limit: 10})
+		checkCode(t, err, "UPSTREAM_CHANGED")
 	}
 }
 
@@ -70,6 +129,10 @@ func checkCode(t *testing.T, err error, code string) {
 
 func TestAllSourcesReturnStructuredRecords(t *testing.T) {
 	for id, body := range fixtures() {
+		// Expanded sources have portal-specific multi-page readers and fixtures.
+		if id == "development.notices.list" {
+			continue
+		}
 		t.Run(id, func(t *testing.T) {
 			p, f := fake(body)
 			r, err := p.List(context.Background(), id, contracts.ListInput{Limit: 100})
@@ -83,9 +146,6 @@ func TestAllSourcesReturnStructuredRecords(t *testing.T) {
 				if i.Navigation != nil || i.Title == "" || i.SourceID == "" {
 					t.Fatal(i)
 				}
-				if id == "library.borrowing.list" && i.Fields[2].Value != "21天" {
-					t.Fatal("bundled rule instead of source", i)
-				}
 				if id == "research.hardware.list" && i.Fields[len(i.Fields)-1].Key != "node_count" {
 					t.Fatal(i)
 				}
@@ -94,16 +154,16 @@ func TestAllSourcesReturnStructuredRecords(t *testing.T) {
 			if strings.Contains(string(raw), "不要返回正文") {
 				t.Fatal("article body leaked")
 			}
-			if id == "life.health.list" || id == "development.notices.list" {
-				if *r.Data.Items[0].PublishedDate != "2026-10-01" {
-					t.Fatal(r)
-				}
-			}
+
 		})
 	}
 }
 func TestRejectFailuresAndChangedPagesWithoutFallback(t *testing.T) {
 	for id, body := range fixtures() {
+		// Expanded sources have portal-specific multi-page readers and fixtures.
+		if id == "development.notices.list" {
+			continue
+		}
 		for _, bad := range []string{"", `<html>统一身份认证<form><input type="password"></form></html>`, `<html><script>loadData()</script></html>`, strings.ReplaceAll(body, "<table>", "<section>") + `<input type="password">`} {
 			p, _ := fake(bad)
 			r, e := p.List(context.Background(), id, contracts.ListInput{Limit: 10})

@@ -46,12 +46,15 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		args []string
 		ids  []string
 	}{
-		{[]string{"list"}, []string{"administration.fees.list", "administration.payments.navigate", "campus.maps.navigate", "campus.organizations.list", "development.activities.navigate", "development.notices.list", "digital.network.navigate", "digital.support.list", "learning.practice.navigate", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.health.list", "life.sports.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
-		{[]string{"search", "校历"}, []string{"public.calendars.list"}},
+		{[]string{"list"}, []string{"administration.fees.get", "administration.fees.list", "administration.payments.navigate", "campus.buildings.list", "campus.maps.navigate", "campus.organizations.list", "development.activities.navigate", "development.notices.get", "development.notices.list", "digital.network.navigate", "digital.software.list", "digital.software.navigate", "digital.support.list", "learning.practice.navigate", "learning.semester.current", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.dining.series", "life.health.get", "life.health.list", "life.sports.navigate", "life.utilities.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
+		{[]string{"search", "校历"}, []string{"learning.semester.current", "public.calendars.list"}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list", "public.notices.search"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},
 		{[]string{"search", "作业"}, []string{}},
-		{[]string{"list", "--category", "development", "--task-group", "activities"}, []string{"development.activities.navigate", "development.notices.list", "learning.practice.navigate"}},
+		{[]string{"search", "宿舍洗浴"}, []string{"life.utilities.navigate"}},
+		{[]string{"search", "软件目录"}, []string{"digital.software.list"}},
+		{[]string{"search", "当前学期"}, []string{"learning.semester.current"}},
+		{[]string{"list", "--category", "development", "--task-group", "activities"}, []string{"development.activities.navigate", "development.notices.get", "development.notices.list", "learning.practice.navigate"}},
 		{[]string{"search", "二课", "--category", "learning", "--task-group", "practice"}, []string{"development.activities.navigate", "learning.practice.navigate"}},
 		{[]string{"list", "--category", "research", "--task-group", "activities"}, []string{}},
 	} {

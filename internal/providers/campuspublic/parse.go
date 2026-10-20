@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/transport"
 	"golang.org/x/net/html"
 )
 
@@ -108,9 +109,26 @@ func officialLink(base, raw string) string {
 	return u.String()
 }
 
-var hospitalClick = regexp.MustCompile(`^windowOpen\("(/web/news/view/xxfbtzgg/[0-9]{1,20})"\)$`)
 var youthArticle = regexp.MustCompile(`^https://youth\.sjtu\.edu\.cn/tzgg/[0-9]{1,10}\.html$`)
-var feeArticle = regexp.MustCompile(`^https://www\.jdcw\.sjtu\.edu\.cn/info/1011/[0-9]{1,10}\.htm$`)
+var softwareDetailPath = regexp.MustCompile(`^/List/[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}/[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
+
+func softwareLink(raw string) string {
+	// Only the reviewed software detail route is data. These links are never
+	// followed by this query; download, activation and external sites stay out.
+	if raw == "" || strings.TrimSpace(raw) != raw || strings.ContainsAny(raw, "\\\x00\r\n\t") {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" || !softwareDetailPath.MatchString(u.Path) {
+		return ""
+	}
+	base, _ := url.Parse("https://software.sjtu.edu.cn/List/rjlb")
+	u = base.ResolveReference(u)
+	if !transport.ExactHTTPS(u, "software.sjtu.edu.cn") || !softwareDetailPath.MatchString(u.Path) {
+		return ""
+	}
+	return u.String()
+}
 
 func parse(id string, body []byte, source string) ([]contracts.Item, error) {
 	fail := func() ([]contracts.Item, error) {
@@ -128,6 +146,36 @@ func parse(id string, body []byte, source string) ([]contracts.Item, error) {
 	}
 	var out []contracts.Item
 	switch id {
+	case "digital.software.list":
+		cards := byClass(doc, "all-li")
+		if len(cards) == 0 || len(cards) > 500 {
+			return fail()
+		}
+		seenLinks, seenTitles := map[string]bool{}, map[string]bool{}
+		for _, card := range cards {
+			anchors, infos := tag(card, "a"), byClass(card, "li-tt")
+			if len(anchors) != 1 || len(infos) != 1 || len(tag(card, "script")) != 0 {
+				return fail()
+			}
+			for _, node := range walk(card, func(n *html.Node) bool { return n.Type == html.ElementNode }) {
+				for _, a := range node.Attr {
+					if strings.HasPrefix(strings.ToLower(a.Key), "on") {
+						return fail()
+					}
+				}
+			}
+			titles, categories, descriptions := tag(infos[0], "h4"), tag(infos[0], "span"), tag(infos[0], "p")
+			if len(titles) != 1 || len(categories) != 1 || len(descriptions) != 1 || len(byClass(anchors[0], "li-tt")) != 1 {
+				return fail()
+			}
+			title, category, description := text(titles[0]), text(categories[0]), text(descriptions[0])
+			link := softwareLink(attr(anchors[0], "href"))
+			if title == "" || category == "" || len(category) > 128 || description == "" || len(description) > 4096 || strings.ContainsAny(title+category+description, "\x00") || link == "" || seenLinks[link] || seenTitles[title] {
+				return fail()
+			}
+			seenLinks[link], seenTitles[title] = true, true
+			out = append(out, item(title, link, []contracts.PublicField{{Key: "category", Label: "软件分类", Value: category}, {Key: "description", Label: "目录简介", Value: description}}))
+		}
 	case "library.borrowing.list", "digital.support.list", "research.hardware.list":
 		var expected, keys []string
 		switch id {
@@ -171,29 +219,6 @@ func parse(id string, body []byte, source string) ([]contracts.Item, error) {
 				out = append(out, item(values[0], source, fields))
 			}
 		}
-	case "life.health.list":
-		for _, n := range byClass(doc, "announcement_list_item") {
-			// The page stores a JSON-escaped path in onclick. Match a fixed grammar;
-			// never evaluate JavaScript or accept an arbitrary destination.
-			m := hospitalClick.FindStringSubmatch(strings.ReplaceAll(attr(n, "onclick"), `\/`, `/`))
-			if m == nil {
-				return fail()
-			}
-			left, right := byClass(n, "announcement_list_item_left"), byClass(n, "announcement_list_item_right")
-			if len(left) != 1 || len(right) != 1 {
-				return fail()
-			}
-			dates, titles := tag(left[0], "p"), tag(right[0], "p")
-			if len(dates) != 2 || len(titles) < 1 {
-				return fail()
-			}
-			v := item(text(titles[0]), officialLink(source, m[1]), nil)
-			v.PublishedDate = validDate(text(dates[1]) + "-" + text(dates[0]))
-			if v.PublishedDate == nil {
-				return fail()
-			}
-			out = append(out, v)
-		}
 	case "development.notices.list":
 		roots := byClass(doc, "tzgg-info")
 		if len(roots) != 1 {
@@ -218,20 +243,6 @@ func parse(id string, body []byte, source string) ([]contracts.Item, error) {
 				return fail()
 			}
 			out = append(out, v)
-		}
-	case "administration.fees.list":
-		for _, root := range byClass(doc, "dh-con") {
-			for _, a := range tag(root, "a") {
-				title := text(a)
-				if !strings.Contains(title, "收费") && !strings.Contains(title, "学费") {
-					continue
-				}
-				link := officialLink(source, attr(a, "href"))
-				if !feeArticle.MatchString(link) {
-					return fail()
-				}
-				out = append(out, item(title, link, nil))
-			}
 		}
 	case "campus.organizations.list":
 		roots := byClass(doc, "org-content")

@@ -63,6 +63,7 @@ type continuation struct {
 	ID      string `json:"id"`
 	Query   string `json:"query"`
 	Parent  string `json:"parent"`
+	Day     string `json:"day"`
 	Limit   int    `json:"limit"`
 	Offset  int    `json:"offset"`
 	Digest  string `json:"digest"`
@@ -74,6 +75,12 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 		return contracts.Response{}, contracts.Fail(code, msg)
 	}
 	now := p.now()
+	if in.ItemID != "" || (id != "life.dining.series" && in.Day != "") {
+		return fail("INVALID_ARGUMENT", "Unsupported feed filter")
+	}
+	if id == "life.dining.series" && in.Day == "" {
+		in.Day = "both"
+	}
 	if in.Limit < 1 || in.Limit > 100 || len(in.Cursor) > 4096 || !utf8.ValidString(in.Query) || utf8.RuneCountInString(in.Query) > 128 {
 		return fail("INVALID_ARGUMENT", "Invalid bounded public query")
 	}
@@ -89,15 +96,18 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 		if in.Query != "" || in.CanteenID != "" {
 			return fail("INVALID_ARGUMENT", "Overview accepts pagination only")
 		}
-	case "life.dining.areas":
+	case "life.dining.areas", "life.dining.series":
 		if in.Query != "" || !contracts.ValidDiningCanteen(in.CanteenID) {
 			return fail("INVALID_ARGUMENT", "A reviewed canteen_id from life.dining.list is required")
 		}
 		target = Sub + "?id=" + in.CanteenID
+		if id == "life.dining.series" && in.Day != "today" && in.Day != "yesterday" && in.Day != "both" {
+			return fail("INVALID_ARGUMENT", "Day must be today, yesterday or both")
+		}
 	default:
 		return fail("UNSUPPORTED", "Unknown feed query")
 	}
-	c := continuation{Version: 1, ID: id, Query: in.Query, Parent: in.CanteenID, Limit: in.Limit, Expires: now.Add(15 * time.Minute).Unix()}
+	c := continuation{Version: 1, ID: id, Query: in.Query, Parent: in.CanteenID, Day: in.Day, Limit: in.Limit, Expires: now.Add(15 * time.Minute).Unix()}
 	if in.Cursor != "" {
 		raw, e := base64.RawURLEncoding.DecodeString(in.Cursor)
 		if e != nil || len(raw) > 2048 {
@@ -105,7 +115,7 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
-		if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || c.Version != 1 || c.ID != id || c.Query != in.Query || c.Parent != in.CanteenID || c.Limit != in.Limit || c.Offset < 1 || c.Offset >= 500 || len(c.Digest) != 64 || c.Expires <= now.Unix() || c.Expires > now.Add(15*time.Minute).Unix() {
+		if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || c.Version != 1 || c.ID != id || c.Query != in.Query || c.Parent != in.CanteenID || c.Day != in.Day || c.Limit != in.Limit || c.Offset < 1 || c.Offset >= 8000 || len(c.Digest) != 64 || c.Expires <= now.Unix() || c.Expires > now.Add(15*time.Minute).Unix() {
 			return fail("INVALID_ARGUMENT", "Cursor expired or query changed")
 		}
 	}
@@ -142,6 +152,10 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 		if id == "life.dining.list" {
 			items, e = parseMain(reply.Body)
 			stale = true
+		} else if id == "life.dining.series" {
+			items, stale, e = parseSeries(reply.Body, in.CanteenID, in.Day, now)
+			scope = "source_meal_window_series"
+			warnings = append(warnings, contracts.Warning{Code: "MEAL_WINDOW_ONLY", Message: "逐点返回源站 curRates/ydaRates，保留真实日期、不抽样。window_start/window_end 是当次源站窗口；未确认全天或任意时段查询接口，窗口之外并非零拥挤。今日未来零值标为 not_yet_observed，不是实测。"})
 		} else {
 			items, stale, e = parseSub(reply.Body, in.CanteenID, now)
 			scope = "canteen_areas"
@@ -161,6 +175,24 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 		return fail("UPSTREAM_CHANGED", "Source records changed; restart query")
 	}
 	end := min(c.Offset+in.Limit, len(items))
+	if id == "life.dining.series" {
+		// Limit counts records, while the transport also has a byte ceiling.
+		// Account for JSON escaping before selecting the bounded page rather
+		// than forcing callers to guess a smaller limit after a failure.
+		budget := contracts.MaxJSONBytes - 4096
+		end = c.Offset
+		for end < len(items) && end < c.Offset+in.Limit {
+			raw, _ := json.Marshal(items[end])
+			if len(raw)+1 > budget {
+				break
+			}
+			budget -= len(raw) + 1
+			end++
+		}
+		if end == c.Offset && end < len(items) {
+			return fail("RESPONSE_TOO_LARGE", "Dining point exceeds the public output budget")
+		}
+	}
 	result := contracts.Response{Data: contracts.Data{Items: items[c.Offset:end]}, Meta: contracts.Meta{Completeness: "partial", Sources: []contracts.Source{{Provider: "campusfeed", URL: target, Status: "ok", Coverage: scope}}, FetchedAt: now.UTC(), Stale: stale, Timezone: "Asia/Shanghai"}, Warnings: warnings}
 	if end < len(items) {
 		c.Offset, c.Digest = end, digest

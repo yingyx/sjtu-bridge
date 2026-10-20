@@ -279,7 +279,8 @@ func parse(body []byte, source, kind string) ([]contracts.Item, string, error) {
 }
 
 func services(in contracts.ListInput) (contracts.Response, error) {
-	c := cursor{Version: 1, Kind: "services", Path: "bundled:2026-09-26", Limit: in.Limit, Expires: time.Now().Add(15 * time.Minute).Unix()}
+	items := directory()
+	c := cursor{Version: 1, Kind: "services", Path: directoryRevision, Limit: in.Limit, Expires: time.Now().Add(15 * time.Minute).Unix()}
 	if in.Cursor != "" {
 		b, err := base64.RawURLEncoding.DecodeString(in.Cursor)
 		if err != nil || len(b) > 2048 {
@@ -287,24 +288,23 @@ func services(in contracts.ListInput) (contracts.Response, error) {
 		}
 		d := json.NewDecoder(bytes.NewReader(b))
 		d.DisallowUnknownFields()
-		if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || c.Version != 1 || c.Kind != "services" || c.Path != "bundled:2026-09-26" || c.Limit != in.Limit || c.Offset < 0 || c.Offset >= 3 || c.Expires <= time.Now().Unix() || c.Expires > time.Now().Add(15*time.Minute).Unix() {
+		if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || c.Version != 1 || c.Kind != "services" || c.Path != directoryRevision || c.Limit != in.Limit || c.Offset < 0 || c.Offset >= len(items) || c.Expires <= time.Now().Unix() || c.Expires > time.Now().Add(15*time.Minute).Unix() {
 			return contracts.Response{}, contracts.Fail("INVALID_ARGUMENT", "Directory cursor expired or does not match this query")
 		}
 	}
-	items := []contracts.Item{
-		{Provider: "publicinfo", SourceID: "jwc", Title: "教务处", URL: "https://www.jwc.sjtu.edu.cn/"},
-		{Provider: "publicinfo", SourceID: "teaching", Title: "教学信息服务网", URL: "https://i.sjtu.edu.cn/"},
-		{Provider: "publicinfo", SourceID: "canvas", Title: "在线教学平台 Canvas", URL: "https://oc.sjtu.edu.cn/"},
-	}
 	end := min(c.Offset+in.Limit, len(items))
 	result := response("https://www.jwc.sjtu.edu.cn/", items[c.Offset:end])
+	result.Meta.Completeness = "partial"
+	result.Meta.Sources = []contracts.Source{}
+	for _, i := range result.Data.Items {
+		result.Meta.Sources = append(result.Meta.Sources, contracts.Source{Provider: "publicinfo", URL: i.URL, Status: "bundled", Coverage: "directory_links_only"})
+	}
 	if end < len(items) {
 		c.Offset = end
 		next := encode(c)
 		result.Meta.HasMore = true
 		result.Meta.NextCursor = &next
-		result.Meta.Sources[0].Coverage = "incomplete"
 	}
-	result.Warnings = []contracts.Warning{{Code: "BUNDLED_DIRECTORY", Message: "Reviewed 2026-09-26; bundled links, not a live availability check."}}
+	result.Warnings = []contracts.Warning{{Code: "BUNDLED_DIRECTORY", Message: "Reviewed 2026-10-20; selected portal locators only, not a complete service inventory or a live availability check. Related capability IDs grant no access."}}
 	return result, nil
 }

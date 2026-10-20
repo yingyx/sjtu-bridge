@@ -29,13 +29,15 @@ func ExecutableRead(c contracts.Capability) bool {
 		return false
 	}
 	switch c.ID {
-	case "public.notices.search", "life.dining.list", "life.dining.areas":
+	case "campus.buildings.list", "learning.semester.current":
+		return c.Provider == "ids" && c.Delivery == contracts.QueryDelivery
+	case "public.notices.search", "life.dining.list", "life.dining.areas", "life.dining.series":
 		return c.Provider == "campusfeed" && c.Delivery == contracts.QueryDelivery
 	case "public.services.list", "public.calendars.list", "public.notices.list":
 		return c.Provider == "publicinfo" && c.Delivery == contracts.QueryDelivery
-	case "learning.practice.navigate", "library.loans.navigate", "library.spaces.navigate", "life.sports.navigate", "development.activities.navigate", "research.computing.navigate", "administration.payments.navigate", "digital.network.navigate", "campus.maps.navigate":
+	case "learning.practice.navigate", "library.loans.navigate", "library.spaces.navigate", "life.sports.navigate", "development.activities.navigate", "research.computing.navigate", "administration.payments.navigate", "digital.network.navigate", "campus.maps.navigate", "life.utilities.navigate", "digital.software.navigate":
 		return c.Provider == "servicenav" && c.Delivery == contracts.NavigationDelivery
-	case "library.borrowing.list", "life.health.list", "development.notices.list", "research.hardware.list", "administration.fees.list", "digital.support.list", "campus.organizations.list":
+	case "library.borrowing.list", "life.health.list", "life.health.get", "development.notices.list", "development.notices.get", "research.hardware.list", "administration.fees.list", "administration.fees.get", "digital.support.list", "campus.organizations.list", "digital.software.list":
 		return c.Provider == "campuspublic" && c.Delivery == contracts.QueryDelivery
 	default:
 		return false

@@ -21,14 +21,21 @@ func TestNavigationRoutesWithoutCopyingRules(t *testing.T) {
 		if err != nil || first.Meta.HasMore != (len(entries[id]) > 1) || first.Meta.Completeness != "partial" || first.Meta.Sources[0].Status != "bundled" || first.Warnings[0].Code != "NAVIGATION_ONLY" {
 			t.Fatal(id, first, err)
 		}
-		second := contracts.Response{}
-		if first.Meta.HasMore {
-			second, err = (Provider{}).List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *first.Meta.NextCursor})
-			if err != nil || second.Meta.HasMore {
-				t.Fatal(second, err)
+		items, page := append([]contracts.Item{}, first.Data.Items...), first
+		for page.Meta.HasMore {
+			if page.Meta.NextCursor == nil || len(items) >= len(entries[id]) {
+				t.Fatal("unbounded or missing continuation", id)
 			}
+			page, err = (Provider{}).List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *page.Meta.NextCursor})
+			if err != nil {
+				t.Fatal(id, err)
+			}
+			items = append(items, page.Data.Items...)
 		}
-		for _, i := range append(first.Data.Items, second.Data.Items...) {
+		if len(items) != len(entries[id]) {
+			t.Fatal("missing navigation destination", id)
+		}
+		for _, i := range items {
 			n := i.Navigation
 			if n == nil || n.Purpose == "" || n.Primary.Category == "" || n.DestinationKind == "" || len(n.Sources) == 0 || n.VerifiedAt == "" || n.LinkCheckedThisCall || n.Upstream.Status != "link_only" || n.Upstream.ReasonCode == "" || n.Upstream.Authentication == "" {
 				t.Fatal(id, i)

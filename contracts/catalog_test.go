@@ -97,7 +97,7 @@ func TestCrossListingsMatchOnePathWithoutDuplicatingCapability(t *testing.T) {
 		category, group string
 		count           int
 	}{
-		{"development", "activities", 3}, {"learning", "practice", 3},
+		{"development", "activities", 4}, {"learning", "practice", 3},
 		{"development", "practice", 0}, {"科研与实验", "科研计算与数据", 2},
 		{"library", "resources", 1},
 	} {

@@ -15,12 +15,13 @@ var catalog = []Capability{
 	feedQuery("public.notices.search", "检索近期教务 RSS 摘要", "learning", "notices", "教务处", []string{"教务摘要", "教务搜索", "RSS", "近期教务通知"}, "读取教务处 RSS 的近期最多 50 条通知；可用 query 按空白分词、全部匹配标题与摘要。无匹配仅表示该 feed 未命中。与 public.notices.list 共享公告链接，后者用于归档索引翻页；不读取正文附件。"),
 	feedQuery("life.dining.list", "查询食堂拥挤度概览", "life", "dining", "校园生活", []string{"食堂", "餐厅", "食堂拥挤度", "就餐"}, "读取校园生活食堂概览、食堂 ID 和源站指标。使用 ID 调用 life.dining.areas 查看分区；本调用不遍历分区。概览没有采样时间，零值或过期数据不能解释为空闲或营业保证。"),
 	feedQuery("life.dining.areas", "查询食堂分区拥挤度", "life", "dining", "校园生活", []string{"食堂分区", "食堂楼层", "餐厅拥挤度"}, "用 life.dining.list 的 canteen_id 查询一座食堂的分区及最新采样；标注采样时间、缺失与过期状态。无采样、零值或关闭状态不能解释为空闲；不提供预测、人数或预约。"),
+	feedQuery("life.dining.series", "查询食堂今日与昨日拥挤度曲线", "life", "dining", "校园生活", []string{"食堂曲线", "今日拥挤度", "昨日拥挤度", "拥挤度变化"}, "用 canteen_id 读取源站今日、昨日或两组曲线，逐点分页保留真实日期和原始指标；day 默认 both。仅返回源站当次提供的用餐时段窗口，不宣称全天，不插值、不抽样、不积累后台历史。请按 next_cursor 读完该窗口。"),
 	{
 		ID: "public.services.list", ContractVersion: "1",
 		Title: "查找校园网站入口", Category: "campus", CategoryLabel: "校情与导览", TaskGroup: "directory", TaskGroupLabel: "机构与官方入口", Service: "校园网站目录",
 		Aliases:     []string{"校园服务", "校园网站", "门户入口", "办事入口"},
 		Keywords:    []string{"services", "portal", "website", "links", "directory"},
-		Description: "查找教务处、教学信息服务网和 Canvas 的官方链接。仅为内置网站目录，不代表网站业务已接入，也不检查实时可用性。",
+		Description: "按校园任务查找教学、图书馆、住宿、活动及数字工具的官网入口和相关已接入能力。仅为内置网站目录，不代表网站业务全部接入，也不检查实时可用性。",
 		DataClass:   PublicData, ExecutionRule: PublicExecution, Effects: []Effect{NoEffect}, Reversibility: NotApplicable, Provider: "publicinfo",
 		Operation: Read, Delivery: QueryDelivery, Credentials: []string{},
 	},
@@ -60,13 +61,27 @@ var catalog = []Capability{
 	navigation("administration.payments.navigate", "查询学生缴费与票据办理入口", "administration", "payments", "学生财务", []string{"学费", "住宿费", "缴费", "票据", "退费"}, []string{"tuition", "payment", "receipt", "refund"}, nil),
 	navigation("digital.network.navigate", "查询校外访问与网络排障入口", "digital", "network", "校园网络", []string{"VPN", "校外访问", "宿舍网络", "网络故障", "NIMO"}, []string{"network", "wifi", "connectivity"}, []TaskPath{{"library", "resources"}}),
 	navigation("campus.maps.navigate", "查询校园地图与地点查找入口", "campus", "maps", "校园地图", []string{"校园地图", "找楼", "校区位置", "地点导览", "无障碍路线"}, []string{"map", "location", "building", "accessibility"}, nil),
-	publicQuery("library.borrowing.list", "查询学生借阅规则", "library", "borrowing", "图书馆", []string{"借阅规则", "借书期限", "续借次数"}, "从图书馆公开表格读取读者类型、借阅册数、外借和续借周期；不查询个人借阅记录。"),
-	publicQuery("life.health.list", "查询校医院公告", "life", "health", "校医院", []string{"校医院公告", "新生体检", "医保通知"}, "读取校医院首页公开公告的标题、发布日期和链接；仅覆盖首页公告，不提供诊疗建议或个人健康数据。"),
-	publicQuery("development.notices.list", "查询团委公告", "development", "activities", "交大青年", []string{"团委公告", "学生竞赛", "挑战杯"}, "读取团委通知公告第一页的标题、日期和链接；不等同于第二课堂活动库或可报名名额。"),
+	navigation("life.utilities.navigate", "定位宿舍电费与洗浴服务", "life", "utilities", "住宿服务", []string{"宿舍电费", "剩余电量", "用电记录", "宿舍洗浴", "洗澡", "浴室"}, []string{"electricity", "bath", "dormitory"}, nil),
+	navigation("digital.software.navigate", "定位正版软件授权与获取入口", "digital", "software", "正版软件中心", []string{"正版软件", "软件下载", "软件激活", "软件授权"}, []string{"software", "license", "activation"}, nil),
+	idsQuery("campus.buildings.list", "查询教学建筑目录", "campus", "maps", []string{"教学楼", "IDS建筑", "校区教学建筑"}, "匿名读取 IDS 发布的教学建筑名称及所属校区；仅覆盖源站教学建筑目录，不代表全部校园建筑、教室空闲、开放或可预约状态。"),
+	idsQuery("learning.semester.current", "查询 IDS 当前学期", "learning", "schedule", []string{"当前学期", "当前学年", "IDS周次"}, "匿名读取 IDS 当前学年、学期和源站原始周次；不计算节假日或教学周，不代表个人课表或完整校历。"),
+	publicQuery("digital.software.list", "查询正版软件目录", "digital", "software", "正版软件中心", []string{"软件目录", "校园正版软件", "可用软件", "MATLAB", "Office", "Windows"}, "读取正版软件中心公开目录的软件名称、分类及官方详情入口；不下载、安装、激活或接受许可，不保证个人授权资格、最新版本及软件当前可用性。"),
+	publicQuery("library.borrowing.list", "查询学生借阅规则", "library", "borrowing", "图书馆", []string{"借阅规则", "借书期限", "续借次数", "预约规则", "续借条件"}, "读取图书馆新生指南与固定正式借阅规则，返回读者额度及普通借阅、短借、续借和预约的来源条件；保留出处和适用限制，不查询个人记录或办理预约续借。"),
+	publicQuery("life.health.list", "查询校医院公告", "life", "health", "校医院", []string{"校医院公告", "新生体检", "医保通知"}, "分页读取校医院通知公告归档的标题、日期、对象ID及链接；按 next_cursor 续页，以 life.health.get 按需读取正文。不提供诊疗建议或个人健康数据。"),
+	publicQuery("life.health.get", "读取校医院公告正文", "life", "health", "校医院", []string{"校医院公告正文", "体检通知详情"}, "用校医院公告列表的 item_id 读取一篇公开正文及来源链接；附件和图片仅列链接，不自动下载，不作为诊疗建议。"),
+	publicQuery("development.notices.list", "查询团委公告", "development", "activities", "交大青年", []string{"团委公告", "学生竞赛", "挑战杯"}, "分页读取团委通知公告归档的标题、日期、对象ID和链接；以 development.notices.get 按需读正文。不等同于第二课堂活动库或可报名名额。"),
+	publicQuery("development.notices.get", "读取团委公告正文", "development", "activities", "交大青年", []string{"团委公告正文", "竞赛通知详情"}, "用团委公告列表的 item_id 读取一篇公开通知正文及来源链接；不自动下载附件，不报名、签到或读取个人参与记录。"),
 	publicQuery("research.hardware.list", "查询超算队列硬件配置", "research", "computing", "交我算 HPC", []string{"超算硬件", "HPC配置", "GPU型号", "计算队列"}, "从官方计算系统表格读取队列、架构、参数和节点数量；是文档发布的配置，不代表实时空闲容量或排队状态。"),
-	publicQuery("administration.fees.list", "查询收费公示索引", "administration", "payments", "财务计划处", []string{"收费公示", "学费公示", "收费标准"}, "读取财务首页信息公开栏中的收费及学费公示标题和链接；不提取收费金额、正文或个人账单。"),
+	publicQuery("administration.fees.list", "查询收费公示索引", "administration", "payments", "财务计划处", []string{"收费公示", "学费公示", "收费标准"}, "分页读取财务信息公示归档中的收费及学费记录，返回对象ID和官方来源；以 administration.fees.get 按需读HTML正文。PDF记录只提供官方来源，不查询个人账单。"),
+	publicQuery("administration.fees.get", "读取收费公示正文", "administration", "payments", "财务计划处", []string{"收费公示正文", "学费调整详情"}, "用收费公示列表的数字 item_id 读取HTML正文、表格文字及公开附件链接；PDF和图片仅提供来源，未解析其金额时明确提示，不推算个人应缴费用。"),
 	publicQuery("digital.support.list", "查询宿舍网络支持联系方式", "digital", "network", "NIMO", []string{"宿舍网络电话", "网管值班", "NIMO联系方式"}, "读取 NIMO 联系表中的校区、值班时间、地点和电话；仅是网页公布的安排，不代表当前有人值班。"),
 	publicQuery("campus.organizations.list", "查询学校机构目录", "campus", "directory", "学校官网", []string{"机构目录", "部门官网", "找部门"}, "读取学校官网机构设置页的名称、机构分组、合署说明与官方链接；保留源站 HTTP 链接，不自动访问各部门网站。"),
+}
+
+func idsQuery(id, title, category, group string, aliases []string, description string) Capability {
+	c := publicQuery(id, title, category, group, "数字化教学服务平台 IDS", aliases, description)
+	c.Provider = "ids"
+	return c
 }
 
 func feedQuery(id, title, category, group, service string, aliases []string, description string) Capability {
