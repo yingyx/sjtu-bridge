@@ -52,11 +52,11 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		if provider == "jaccount" {
 			return contracts.Fail("NOT_READY", "JAAuthCookie stable identity is not ready for persistent import")
 		}
-		if provider != "canvas" && provider != "teaching" && provider != "sjtumail" {
-			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, teaching or sjtumail")
+		if provider != "canvas" && provider != "teaching" && provider != "sjtumail" && provider != "activity" && provider != "electric" {
+			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, teaching, sjtumail, activity or electric")
 		}
 		if browserContext && provider == "canvas" {
-			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for teaching and sjtumail")
+			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for campus JAAuthCookie providers")
 		}
 		normalizer := provider
 		if provider != "canvas" {
@@ -93,7 +93,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return writeJSON(out, v)
 	}}
-	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), teaching / sjtumail (JAAuthCookie, independently verified portal account)")
+	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), teaching / sjtumail / activity / electric (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
@@ -146,6 +146,12 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	courses.Flags().StringVar(&courseQ.CredentialID, "credential", "", "Verified credential ID")
 	_ = courses.MarkFlagRequired("credential")
 	authCmd.AddCommand(courses)
+	resourcesQ := &broker.AdminRequest{}
+	resources := ownerCommand("resources", "resources", resourcesQ, false)
+	resources.Short = "查询本人宿舍电费账号的已绑定房间资源；不授予应用访问权"
+	resources.Flags().StringVar(&resourcesQ.CredentialID, "credential", "", "Independently verified electricity credential ID")
+	_ = resources.MarkFlagRequired("credential")
+	authCmd.AddCommand(resources)
 	root.AddCommand(authCmd)
 	apps := &cobra.Command{Use: "apps", GroupID: "management", Short: "创建、轮换和撤销应用连接"}
 	for _, action := range []string{"create", "rotate"} {
@@ -201,8 +207,8 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	grant.Flags().StringVar(&g.AccountRef, "account", "", "Stable account_ref (canvas:user:ID)")
 	grant.Flags().StringSliceVar(&g.Courses, "courses", nil, "Exact course_refs, comma separated")
 	grant.Flags().StringVar(&g.Capability, "capability", contracts.AssignmentsCapability, "Exact capability ID; one active grant per app")
-	grant.Flags().StringSliceVar(&g.Resources, "resources", nil, "Exact portal resource_refs, e.g. teaching:term:2026:1 or mail:folder:inbox")
-	grant.Flags().StringVar(&g.View, "view", "", "Canvas: summary_v1/deadlines_v1; timetable: schedule_v1; inbox: headers_v1")
+	grant.Flags().StringSliceVar(&g.Resources, "resources", nil, "Exact portal resource_refs; use auth resources for the verified electricity room")
+	grant.Flags().StringVar(&g.View, "view", "", "Canvas: summary_v1/deadlines_v1; timetable: schedule_v1; inbox: headers_v1; activities: summaries_v1; electricity: balance_v1 (limit=1)")
 	grant.Flags().IntVar(&g.Limit, "limit", 20, "Per-call item cap (1-100)")
 	grant.Flags().IntVar(&g.Days, "days", 30, "Grant lifetime (1-30 days)")
 	for _, flag := range []string{"app", "credential", "account", "view"} {
@@ -240,7 +246,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	assignments.AddCommand(list)
 	canvas.AddCommand(assignments)
 	root.AddCommand(canvas)
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability} {
+	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability, contracts.ElectricityBalanceCapability} {
 		metadata, _ := contracts.PersonalMetadata(id)
 		parts := strings.Split(id, ".")
 		group := findCommand(root, parts[0])
@@ -248,8 +254,11 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: metadata.CategoryLabel}
 			root.AddCommand(group)
 		}
-		resource := &cobra.Command{Use: parts[1]}
-		group.AddCommand(resource)
+		resource := findCommand(group, parts[1])
+		if resource == nil {
+			resource = &cobra.Command{Use: parts[1]}
+			group.AddCommand(resource)
+		}
 		var q contracts.CampusQuery
 		list := &cobra.Command{Use: parts[2], Short: metadata.Title, Long: metadata.Description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			c, e := client.Open(*connection)
@@ -265,9 +274,13 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			return writeJSON(out, v)
 		}}
 		list.Flags().StringVar(&q.AccountRef, "account", "", "Granted stable portal account_ref")
-		list.Flags().StringVar(&q.ResourceRef, "resource", "", "Granted term or inbox resource_ref")
-		list.Flags().StringVar(&q.View, "view", "", "Granted schedule_v1 or headers_v1 view")
-		list.Flags().IntVar(&q.Limit, "limit", 20, "Maximum items for one page (mail <=50)")
+		list.Flags().StringVar(&q.ResourceRef, "resource", "", "Granted portal resource_ref")
+		list.Flags().StringVar(&q.View, "view", "", "Granted schedule_v1, headers_v1, summaries_v1 or balance_v1 view")
+		defaultLimit := 20
+		if id == contracts.ElectricityBalanceCapability {
+			defaultLimit = 1
+		}
+		list.Flags().IntVar(&q.Limit, "limit", defaultLimit, "Maximum items for one page (mail <=50; activities <=20; electricity=1)")
 		list.Flags().StringVar(&q.Cursor, "cursor", "", "Opaque Broker continuation")
 		if id == contracts.MailCapability {
 			list.Flags().StringVar(&q.Query, "query", "", "Literal subject keywords; no message body search")

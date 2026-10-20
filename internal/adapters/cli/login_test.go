@@ -49,3 +49,15 @@ func TestReuseLoginTargetsSelectsOnlyOtherPortal(t *testing.T) {
 		}
 	}
 }
+
+func TestReuseLoginTargetsExplicitActivityPortal(t *testing.T) {
+	raw := []byte(`{"credentials":{"source":{"provider":"teaching","kind":"JAAuthCookie","active":true}}}`)
+	got, e := reuseLoginTargets(raw, "source", []string{"activity"}, true)
+	if e != nil || !reflect.DeepEqual(got, []string{"activity"}) {
+		t.Fatal("explicit activity target unavailable", e)
+	}
+	raw = []byte(`{"credentials":{"source":{"provider":"activity","kind":"JAAuthCookie","active":true}}}`)
+	if _, e = reuseLoginTargets(raw, "source", []string{"activity"}, true); e == nil {
+		t.Fatal("activity source selected as its own target")
+	}
+}

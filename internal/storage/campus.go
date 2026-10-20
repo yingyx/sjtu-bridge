@@ -59,7 +59,7 @@ func validCredential(c Credential) bool {
 	switch c.Provider {
 	case "canvas":
 		return c.Kind == "CanvasToken"
-	case "teaching", "sjtumail":
+	case "teaching", "sjtumail", "activity", "electric":
 		return c.Kind == "JAAuthCookie"
 	default:
 		return false
@@ -85,6 +85,14 @@ func validGrant(g Grant) bool {
 		}
 	case contracts.MailCapability:
 		if g.View != "headers_v1" || g.Limit > 50 {
+			return false
+		}
+	case contracts.ActivityCapability:
+		if g.View != "summaries_v1" || g.Limit > 20 {
+			return false
+		}
+	case contracts.ElectricityBalanceCapability:
+		if g.View != "balance_v1" || g.Limit != 1 || len(g.Resources) != 1 {
 			return false
 		}
 	default:

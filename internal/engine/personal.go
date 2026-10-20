@@ -162,7 +162,7 @@ func Safe(err error) error {
 // Invoke publishes exactly one bounded JSON buffer. Authorization is checked
 // under the same per-object fences used by durable management revocations.
 func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
-	if inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability {
+	if inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability || inv.Capability == contracts.ActivityCapability || inv.Capability == contracts.ElectricityBalanceCapability {
 		return p.invokeCampus(ctx, token, inv, send)
 	}
 	ctx, deadlineCancel := context.WithTimeout(ctx, 15*time.Second)

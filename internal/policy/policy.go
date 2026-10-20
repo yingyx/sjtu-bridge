@@ -11,10 +11,16 @@ func ExecutableRead(c contracts.Capability) bool {
 	}
 	switch c.DataClass {
 	case contracts.PersonalData:
-		if c.ID == contracts.TimetableCapability || c.ID == contracts.MailCapability {
+		if c.ID == contracts.TimetableCapability || c.ID == contracts.MailCapability || c.ID == contracts.ActivityCapability || c.ID == contracts.ElectricityBalanceCapability {
 			provider := "teaching"
 			if c.ID == contracts.MailCapability {
 				provider = "sjtumail"
+			}
+			if c.ID == contracts.ActivityCapability {
+				provider = "activity"
+			}
+			if c.ID == contracts.ElectricityBalanceCapability {
+				provider = "electric"
 			}
 			return c.Provider == provider && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "JAAuthCookie"
 		}

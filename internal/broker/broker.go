@@ -21,7 +21,9 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/domain"
 	"github.com/yingyx/sjtu-bridge/internal/engine"
 	"github.com/yingyx/sjtu-bridge/internal/local"
+	"github.com/yingyx/sjtu-bridge/internal/providers/activity"
 	"github.com/yingyx/sjtu-bridge/internal/providers/canvas"
+	"github.com/yingyx/sjtu-bridge/internal/providers/electric"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sjtumail"
 	"github.com/yingyx/sjtu-bridge/internal/providers/teaching"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
@@ -117,7 +119,11 @@ func Run(ctx context.Context) error {
 	defer closeTeaching()
 	mailService, closeMail := sjtumail.New()
 	defer closeMail()
-	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService}
+	activityService, closeActivity := activity.New()
+	defer closeActivity()
+	electricService, closeElectric := electric.New()
+	defer closeElectric()
+	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "electric": electricService}
 	return b.Serve(ctx, l)
 }
 func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
@@ -208,6 +214,16 @@ func (b *Broker) Handler() http.Handler {
 			}
 			return
 		}
+		if binding, ok := v.(resourceVerification); ok {
+			e = b.Store.PublishSourceCredential(binding.source, func() error {
+				writeJSON(w, map[string]any{"account_ref": binding.account, "resource_refs": []string{binding.resource}})
+				return nil
+			})
+			if e != nil {
+				writeError(w, e)
+			}
+			return
+		}
 		writeJSON(w, v)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +257,7 @@ func (b *Broker) invoke(ctx context.Context, token string, inv contracts.Invocat
 	if err := b.Engine.Discover(token, func([]contracts.Capability) error { return nil }); err != nil {
 		return err
 	}
-	if inv.Capability == contracts.AssignmentsCapability || inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability {
+	if inv.Capability == contracts.AssignmentsCapability || inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability || inv.Capability == contracts.ActivityCapability || inv.Capability == contracts.ElectricityBalanceCapability {
 		return b.Engine.Invoke(ctx, token, inv, send)
 	}
 	if b.publicErr != nil {

@@ -41,6 +41,11 @@ type sourceVerification struct {
 	source  storage.Credential
 }
 
+type resourceVerification struct {
+	account, resource string
+	source            storage.Credential
+}
+
 func lifetime(days int) (time.Time, error) {
 	if days == 0 {
 		days = 30
@@ -85,6 +90,38 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 			apps = append(apps, map[string]any{"id": a.ID, "active": a.Active, "expires": a.Expires, "generation": a.Generation})
 		}
 		return map[string]any{"revision": s.Revision, "apps": apps, "credentials": s.Credentials, "grants": s.Grants, "jaccount": "portal_specific_identity_required"}, nil
+	case "resources":
+		c := s.Credentials[q.CredentialID]
+		if c.Provider != "electric" || b.Engine.CampusProviders[c.Provider] == nil || len(q.Secret) != 0 {
+			return nil, contracts.Fail("UNSUPPORTED", "Bound resource discovery requires a saved electricity credential")
+		}
+		if e := b.Store.CheckSourceCredential(c); e != nil {
+			return nil, e
+		}
+		provider, ok := b.Engine.CampusProviders[c.Provider].(domain.CampusBinding)
+		if !ok {
+			return nil, contracts.Fail("UNSUPPORTED", "Bound resource discovery is unavailable")
+		}
+		account, resource := "", ""
+		e := b.Engine.Do(ctx, func(ctx context.Context) error {
+			secret, e := b.Store.SourceCredentialSecret(c)
+			if e != nil {
+				return e
+			}
+			defer clear(secret)
+			account, resource, e = provider.Binding(ctx, secret)
+			return e
+		})
+		if e != nil {
+			return nil, e
+		}
+		if account != c.AccountRef || !contracts.ValidCampusResource(contracts.ElectricityBalanceCapability, resource) {
+			return nil, contracts.Fail("PERMISSION_DENIED", "Saved electricity account or bound room changed")
+		}
+		if e = b.Store.CheckSourceCredential(c); e != nil {
+			return nil, e
+		}
+		return resourceVerification{account: account, resource: resource, source: c}, nil
 	case "verify", "import":
 		if q.Action == "import" && len(s.Credentials) >= 256 {
 			return nil, contracts.Fail("RATE_LIMITED", "Credential record capacity reached")

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/domain"
 	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/policy"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
@@ -27,9 +28,18 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	if q.Capability == contracts.MailCapability {
 		view = "headers_v1"
 		maxLimit = 50
+	} else if q.Capability == contracts.ActivityCapability {
+		view = "summaries_v1"
+		maxLimit = 20
+	} else if q.Capability == contracts.ElectricityBalanceCapability {
+		view = "balance_v1"
+		maxLimit = 1
 	}
 	if q.View != view || q.Limit < 1 || q.Limit > maxLimit || len(q.Resources) < 1 || len(q.Resources) > 8 || len(q.Courses) != 0 {
 		return nil, contracts.Fail("INVALID_ARGUMENT", "Choose explicit resources, a fixed view, and bounded limit")
+	}
+	if q.Capability == contracts.ElectricityBalanceCapability && len(q.Resources) != 1 {
+		return nil, contracts.Fail("INVALID_ARGUMENT", "Choose exactly the verified bound room")
 	}
 	seen := map[string]bool{}
 	for _, resource := range q.Resources {
@@ -45,7 +55,20 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 			return e
 		}
 		defer clear(secret)
-		actual, e := b.Engine.CampusProviders[metadata.Provider].Identity(ctx, secret)
+		actual := ""
+		if q.Capability == contracts.ElectricityBalanceCapability {
+			binding, ok := b.Engine.CampusProviders[metadata.Provider].(domain.CampusBinding)
+			if !ok {
+				return contracts.Fail("UNSUPPORTED", "Bound-room identity is unavailable")
+			}
+			var resource string
+			actual, resource, e = binding.Binding(ctx, secret)
+			if e == nil && resource != q.Resources[0] {
+				return contracts.Fail("PERMISSION_DENIED", "Granted room must match the verified portal binding")
+			}
+		} else {
+			actual, e = b.Engine.CampusProviders[metadata.Provider].Identity(ctx, secret)
+		}
 		if e != nil {
 			return e
 		}

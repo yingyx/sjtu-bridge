@@ -17,6 +17,12 @@ type Campus interface {
 	Read(context.Context, []byte, string, contracts.CampusQuery, string) (CampusPage, error)
 }
 
+// CampusBinding is an optional owner-only resource-discovery port. Its result
+// is not an application grant and is never added to the application catalog.
+type CampusBinding interface {
+	Binding(context.Context, []byte) (account, resource string, err error)
+}
+
 type CanvasCourse struct {
 	Ref   string `json:"course_ref"`
 	Title string `json:"title"`

@@ -20,6 +20,8 @@ import (
 
 var teachingRecordRef = regexp.MustCompile(`^teaching:meeting:[a-f0-9]{64}$`)
 var mailRecordRef = regexp.MustCompile(`^sjtumail:message:[1-9][0-9]{0,17}$`)
+var activityRecordRef = regexp.MustCompile(`^activity:event:[a-zA-Z0-9_-]{1,64}$`)
+var electricAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 
 func parseCampus(id string, raw []byte) (contracts.CampusQuery, error) {
 	var q contracts.CampusQuery
@@ -37,8 +39,11 @@ func parseCampus(id string, raw []byte) (contracts.CampusQuery, error) {
 	if len(raw) > contracts.MaxJSONBytes || d.Decode(&q) != nil || d.Decode(new(any)) != io.EOF || !contracts.ValidCampusResource(id, q.ResourceRef) || q.AccountRef == "" || len(q.AccountRef) > 128 || q.Limit < 1 || q.Limit > 100 || len(q.Cursor) > 64 || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
 		return q, contracts.Fail("INVALID_ARGUMENT", "Expected a bounded fixed-view campus query")
 	}
-	if (id == contracts.TimetableCapability && (q.Query != "" || q.View != "schedule_v1")) || (id == contracts.MailCapability && (q.Limit > 50 || q.View != "headers_v1")) {
+	if (id == contracts.TimetableCapability && (q.Query != "" || q.View != "schedule_v1")) || (id == contracts.MailCapability && (q.Limit > 50 || q.View != "headers_v1")) || (id == contracts.ActivityCapability && (q.Query != "" || q.Limit > 20 || q.View != "summaries_v1")) {
 		return q, contracts.Fail("INVALID_ARGUMENT", "Unsupported campus query view or filter")
+	}
+	if id == contracts.ElectricityBalanceCapability && (q.Query != "" || q.Limit != 1 || q.View != "balance_v1" || q.Cursor != "") {
+		return q, contracts.Fail("INVALID_ARGUMENT", "Electricity balance requires one bound-room fixed view without pagination")
 	}
 	return q, nil
 }
@@ -117,9 +122,16 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	expectedCoverage := "regular_courses_only"
 	if inv.Capability == contracts.MailCapability {
 		expectedCoverage = "inbox_headers_only"
+	} else if inv.Capability == contracts.ActivityCapability {
+		expectedCoverage = "visible_activity_summaries_only"
+	} else if inv.Capability == contracts.ElectricityBalanceCapability {
+		expectedCoverage = "bound_room_balance_only"
 	}
 	if page.AccountRef != scope.AccountRef || len(page.Rows) > q.Limit || len(page.Next) > 8192 || page.Coverage != expectedCoverage {
 		return contracts.Fail("UPSTREAM_CHANGED", "Campus result exceeded the authorized scope")
+	}
+	if inv.Capability == contracts.ElectricityBalanceCapability && (len(page.Rows) != 1 || page.Next != "") {
+		return contracts.Fail("UPSTREAM_CHANGED", "Electricity balance must include exactly the bound room")
 	}
 	rows := []contracts.CampusRecord{}
 	seen := map[string]bool{}
@@ -128,9 +140,14 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 			return contracts.Fail("UPSTREAM_CHANGED", "Invalid campus resource")
 		}
 		seen[r.Ref] = true
-		for _, v := range []string{r.Ref, r.Title, r.CourseCode, r.Location, r.Campus, r.Weekday, r.Periods, r.Weeks, r.Sender, r.SentAt} {
+		for _, v := range []string{r.Ref, r.Title, r.CourseCode, r.Location, r.Campus, r.Weekday, r.Periods, r.Weeks, r.Sender, r.SentAt, r.RemainingKWh, r.SubsidyKWh} {
 			if !utf8.ValidString(v) || len(v) > 2048 || strings.ContainsAny(v, "\x00\r\n") {
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid campus record field")
+			}
+		}
+		for _, v := range r.ActivityTime {
+			if !utf8.ValidString(v) || len(v) > 2048 || strings.ContainsAny(v, "\x00\r\n") {
+				return contracts.Fail("UPSTREAM_CHANGED", "Invalid activity time field")
 			}
 		}
 		// Rebuild the fixed view rather than copying a provider's union wholesale.
@@ -140,7 +157,7 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid timetable record")
 			}
 			row.CourseCode, row.Location, row.Campus, row.Weekday, row.Periods, row.Weeks = r.CourseCode, r.Location, r.Campus, r.Weekday, r.Periods, r.Weeks
-		} else {
+		} else if inv.Capability == contracts.MailCapability {
 			if !mailRecordRef.MatchString(r.Ref) {
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid mailbox record")
 			}
@@ -148,6 +165,18 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid message date")
 			}
 			row.Sender, row.SentAt = r.Sender, r.SentAt
+		} else if inv.Capability == contracts.ActivityCapability {
+			if !activityRecordRef.MatchString(r.Ref) || r.Title == "" || len(r.ActivityTime) != 2 || r.ActivityTime[0] == "" || r.ActivityTime[1] == "" {
+				return contracts.Fail("UPSTREAM_CHANGED", "Invalid activity summary")
+			}
+			row.Location, row.ActivityTime = r.Location, append([]string(nil), r.ActivityTime...)
+		} else if inv.Capability == contracts.ElectricityBalanceCapability {
+			if r.Ref != "electric:balance:"+strings.TrimPrefix(q.ResourceRef, "electric:room:") || r.Title == "" || len(r.RemainingKWh) > 64 || len(r.SubsidyKWh) > 64 || !electricAmount.MatchString(r.RemainingKWh) || !electricAmount.MatchString(r.SubsidyKWh) {
+				return contracts.Fail("UPSTREAM_CHANGED", "Invalid bound-room electricity balance")
+			}
+			row.RemainingKWh, row.SubsidyKWh = r.RemainingKWh, r.SubsidyKWh
+		} else {
+			return contracts.Fail("PERMISSION_DENIED", "Unsupported campus view")
 		}
 		rows = append(rows, row)
 	}

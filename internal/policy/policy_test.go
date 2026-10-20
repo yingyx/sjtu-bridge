@@ -25,6 +25,14 @@ func TestReviewedCatalogExecutionCeiling(t *testing.T) {
 	if !PersonalAllowed(private) || Allowed("public", private, "") {
 		t.Fatal("private capability crossed public boundary")
 	}
+	personal := []contracts.Capability{private}
+	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability, contracts.ElectricityBalanceCapability} {
+		c, ok := contracts.PersonalMetadata(id)
+		if !ok || !PersonalAllowed(c) || Allowed("public", c, "") {
+			t.Fatal("personal ceiling or public isolation", id)
+		}
+		personal = append(personal, c)
+	}
 
 	mutations := map[string]func(*contracts.Capability){
 		"new capability":                      func(c *contracts.Capability) { c.ID += ".new" },
@@ -73,7 +81,7 @@ func TestReviewedCatalogExecutionCeiling(t *testing.T) {
 	for _, effect := range []contracts.Effect{contracts.CommunicationEffect, contracts.ResourceCommitmentEffect, contracts.FormalSubmissionEffect, contracts.FinancialEffect, contracts.AccessControlEffect, contracts.DestructiveEffect} {
 		mutations["effect "+string(effect)] = func(c *contracts.Capability) { c.Effects = []contracts.Effect{effect} }
 	}
-	for _, original := range append(public, private) {
+	for _, original := range append(public, personal...) {
 		for name, mutate := range mutations {
 			t.Run(original.ID+"/"+name, func(t *testing.T) {
 				c := contracts.CloneCapability(original)
