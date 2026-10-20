@@ -12,7 +12,6 @@ import (
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/domain"
-	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/policy"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
 )
@@ -23,15 +22,6 @@ type Auditor interface {
 
 var assignmentRef = regexp.MustCompile(`^canvas:assignment:[1-9][0-9]{0,17}$`)
 
-type cursor struct {
-	AppID, CredentialID       string
-	AppGen, GrantGen, CredGen uint64
-	Query                     contracts.AssignmentQuery
-	Next                      string
-	Expires                   time.Time
-	CampusID                  string
-	CampusQuery               contracts.CampusQuery
-}
 type active struct {
 	AppID, CredentialID string
 	Cancel              context.CancelFunc
@@ -92,7 +82,7 @@ func (p *Personal) Invalidate(app, credential string) {
 		}
 	}
 	for id, c := range p.cursors {
-		if (app == "" || app == c.AppID) && (credential == "" || credential == c.CredentialID) {
+		if (app == "" || app == c.Key.AppID) && (credential == "" || credential == c.Key.CredentialID) {
 			delete(p.cursors, id)
 		}
 	}
@@ -165,23 +155,9 @@ func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invoc
 	if inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability || inv.Capability == contracts.ActivityCapability || inv.Capability == contracts.ElectricityBalanceCapability {
 		return p.invokeCampus(ctx, token, inv, send)
 	}
-	ctx, deadlineCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer deadlineCancel()
-	started := time.Now()
-	id := local.Random()
-	event := storage.AuditEvent{RequestID: id, Capability: contracts.AssignmentsCapability, Decision: "deny"}
-	defer func() {
-		if err != nil {
-			err = Safe(err)
-			copy := *err.(*contracts.Error)
-			copy.RequestID = id
-			err = &copy
-			event.Decision = "deny"
-			event.Code = err.(*contracts.Error).Code
-			event.ElapsedMS = time.Since(started).Milliseconds()
-			_ = p.Audit.Write(event)
-		}
-	}()
+	ctx, request := p.startRequest(ctx, contracts.AssignmentsCapability)
+	defer request.finish(&err)
+	id := request.id
 	if inv.Capability != contracts.AssignmentsCapability || inv.AccountRef != "" || !policy.PersonalAllowed(p.capability) {
 		return contracts.Fail("PERMISSION_DENIED", "Capability is not authorized")
 	}
@@ -193,42 +169,15 @@ func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invoc
 	if err != nil {
 		return err
 	}
-	event.ClientID = l.App.ID
-	event.AccountRef = l.Grant.AccountRef
-	event.View = l.Grant.View
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	p.mu.Lock()
-	p.active[id] = active{l.App.ID, l.Credential.ID, cancel}
-	p.mu.Unlock()
-	defer func() { p.mu.Lock(); delete(p.active, id); p.mu.Unlock() }()
-	next := ""
-	if q.Cursor != "" {
-		p.mu.Lock()
-		c, ok := p.cursors[q.Cursor]
-		p.mu.Unlock()
-		base := q
-		base.Cursor = ""
-		if !ok || time.Now().After(c.Expires) || c.AppID != l.App.ID || c.CredentialID != l.Credential.ID || c.AppGen != l.App.Generation || c.GrantGen != l.Grant.Generation || c.CredGen != l.Credential.Generation || c.Query != base {
-			return contracts.Fail("PERMISSION_DENIED", "Cursor unavailable for this authorization")
-		}
-		next = c.Next
+	scope := contracts.ReadScope{Capability: contracts.AssignmentsCapability, AccountRef: q.AccountRef, ResourceRef: q.CourseRef, View: q.View, Limit: q.Limit}
+	request.bind(l, scope, "")
+	next, err := request.continuation(q.Cursor)
+	if err != nil {
+		return err
 	}
 	var page domain.AssignmentPage
-	err = p.Do(ctx, func(ctx context.Context) error {
-		// A request revoked while queued must not start provider work.
-		n, e := p.Store.Resolve(token, q)
-		if e != nil {
-			return e
-		}
-		if n.App.Generation != l.App.Generation || n.Grant.Generation != l.Grant.Generation || n.Credential.ID != l.Credential.ID || n.Credential.Generation != l.Credential.Generation {
-			return contracts.Fail("PERMISSION_DENIED", "Authorization changed while queued")
-		}
-		secret, e := p.Store.Secret(l.Credential)
-		if e != nil {
-			return e
-		}
-		defer clear(secret)
+	err = request.fetch(ctx, token, func(ctx context.Context, secret []byte) error {
+		var e error
 		page, e = p.Provider.Assignments(ctx, secret, l.Credential.AccountRef, q.CourseRef, q.Limit, next)
 		return e
 	})
@@ -263,52 +212,15 @@ func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invoc
 		}
 		result.Data.Items = append(result.Data.Items, item)
 	}
-	var cursorID string
-	if page.Next != "" {
-		p.mu.Lock()
-		for k, c := range p.cursors {
-			if time.Now().After(c.Expires) {
-				delete(p.cursors, k)
-			}
-		}
-		if len(p.cursors) >= 256 {
-			p.mu.Unlock()
-			return contracts.Fail("RATE_LIMITED", "Cursor capacity exhausted")
-		}
-		cursorID = local.Random()
-		base := q
-		base.Cursor = ""
-		p.cursors[cursorID] = cursor{AppID: l.App.ID, CredentialID: l.Credential.ID, AppGen: l.App.Generation, GrantGen: l.Grant.Generation, CredGen: l.Credential.Generation, Query: base, Next: page.Next, Expires: time.Now().Add(5 * time.Minute)}
-		p.mu.Unlock()
-		result.Meta.NextCursor = &cursorID
-		result.Meta.HasMore = true
+	if err = request.stageCursor(page.Next, &result.Meta); err != nil {
+		return err
+	}
+	if result.Meta.HasMore {
 		result.Meta.Coverage = "page"
 	}
-	defer func() {
-		if err != nil && cursorID != "" {
-			p.mu.Lock()
-			delete(p.cursors, cursorID)
-			p.mu.Unlock()
-		}
-	}()
 	b, err := json.Marshal(result)
 	if err != nil || len(b) > contracts.MaxJSONBytes {
 		return contracts.Fail("RESPONSE_TOO_LARGE", "Result exceeds 256 KiB")
 	}
-	event.Decision = "allow"
-	event.Code = "OK"
-	event.Bytes = len(b)
-	event.ElapsedMS = time.Since(started).Milliseconds()
-	if err = p.Audit.Write(event); err != nil {
-		return contracts.Fail("AUDIT_UNAVAILABLE", "Private result withheld because audit is unavailable")
-	}
-	if p.BeforePublish != nil {
-		p.BeforePublish()
-	}
-	return p.Store.Publish(token, q, l, func() error {
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		return send(b)
-	})
+	return request.publish(ctx, token, b, send)
 }

@@ -13,9 +13,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/domain"
-	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/policy"
-	"github.com/yingyx/sjtu-bridge/internal/storage"
 )
 
 var teachingRecordRef = regexp.MustCompile(`^teaching:meeting:[a-f0-9]{64}$`)
@@ -43,22 +41,9 @@ func parseCampus(id string, raw []byte) (contracts.CampusQuery, error) {
 	return q, nil
 }
 func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	started := time.Now()
-	id := local.Random()
-	event := storage.AuditEvent{RequestID: id, Capability: inv.Capability, Decision: "deny"}
-	defer func() {
-		if err != nil {
-			err = Safe(err)
-			copy := *err.(*contracts.Error)
-			copy.RequestID = id
-			err = &copy
-			event.Decision, event.Code = "deny", copy.Code
-			event.ElapsedMS = time.Since(started).Milliseconds()
-			_ = p.Audit.Write(event)
-		}
-	}()
+	ctx, request := p.startRequest(ctx, inv.Capability)
+	defer request.finish(&err)
+	id := request.id
 	metadata, ok := contracts.PersonalMetadata(inv.Capability)
 	if !ok || inv.AccountRef != "" || !policy.PersonalAllowed(metadata) || p.CampusProviders[metadata.Provider] == nil {
 		return contracts.Fail("PERMISSION_DENIED", "Campus capability is not authorized")
@@ -72,39 +57,14 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	if e != nil {
 		return e
 	}
-	event.ClientID, event.AccountRef, event.View = lease.App.ID, lease.Grant.AccountRef, lease.Grant.View
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
-	p.mu.Lock()
-	p.active[id] = active{lease.App.ID, lease.Credential.ID, stop}
-	p.mu.Unlock()
-	defer func() { p.mu.Lock(); delete(p.active, id); p.mu.Unlock() }()
-	next := ""
-	base := q
-	base.Cursor = ""
-	if q.Cursor != "" {
-		p.mu.Lock()
-		c, found := p.cursors[q.Cursor]
-		p.mu.Unlock()
-		if !found || c.CampusID != inv.Capability || c.CampusQuery != base || c.AppID != lease.App.ID || c.CredentialID != lease.Credential.ID || c.AppGen != lease.App.Generation || c.GrantGen != lease.Grant.Generation || c.CredGen != lease.Credential.Generation || !time.Now().Before(c.Expires) {
-			return contracts.Fail("PERMISSION_DENIED", "Cursor unavailable for this authorization")
-		}
-		next = c.Next
+	request.bind(lease, scope, q.Query)
+	next, e := request.continuation(q.Cursor)
+	if e != nil {
+		return e
 	}
 	var page domain.CampusPage
-	err = p.Do(ctx, func(ctx context.Context) error {
-		current, e := p.Store.ResolveRead(token, scope)
-		if e != nil {
-			return e
-		}
-		if current.App.Generation != lease.App.Generation || current.Grant.Generation != lease.Grant.Generation || current.Credential.ID != lease.Credential.ID || current.Credential.Generation != lease.Credential.Generation {
-			return contracts.Fail("PERMISSION_DENIED", "Authorization changed while queued")
-		}
-		secret, e := p.Store.Secret(lease.Credential)
-		if e != nil {
-			return e
-		}
-		defer clear(secret)
+	err = request.fetch(ctx, token, func(ctx context.Context, secret []byte) error {
+		var e error
 		page, e = p.CampusProviders[metadata.Provider].Read(ctx, secret, lease.Grant.AccountRef, q, next)
 		return e
 	})
@@ -169,30 +129,9 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 		rows = append(rows, row)
 	}
 	result := contracts.CampusResponse{SchemaVersion: "1", RequestID: id, Data: contracts.CampusData{Items: rows}, Meta: contracts.PageMeta{Provider: metadata.Provider, Coverage: page.Coverage, FetchedAt: time.Now().UTC()}}
-	cursorID := ""
-	if page.Next != "" {
-		p.mu.Lock()
-		for key, c := range p.cursors {
-			if !time.Now().Before(c.Expires) {
-				delete(p.cursors, key)
-			}
-		}
-		if len(p.cursors) >= 256 {
-			p.mu.Unlock()
-			return contracts.Fail("RATE_LIMITED", "Cursor capacity exhausted")
-		}
-		cursorID = local.Random()
-		p.cursors[cursorID] = cursor{AppID: lease.App.ID, CredentialID: lease.Credential.ID, AppGen: lease.App.Generation, GrantGen: lease.Grant.Generation, CredGen: lease.Credential.Generation, CampusID: inv.Capability, CampusQuery: base, Next: page.Next, Expires: time.Now().Add(5 * time.Minute)}
-		p.mu.Unlock()
-		result.Meta.NextCursor, result.Meta.HasMore = &cursorID, true
+	if e = request.stageCursor(page.Next, &result.Meta); e != nil {
+		return e
 	}
-	defer func() {
-		if err != nil && cursorID != "" {
-			p.mu.Lock()
-			delete(p.cursors, cursorID)
-			p.mu.Unlock()
-		}
-	}()
 	raw, e := json.Marshal(result)
 	if e != nil || len(raw) > contracts.MaxJSONBytes {
 		return contracts.Fail("RESPONSE_TOO_LARGE", "Campus result exceeds 256 KiB")
@@ -207,17 +146,5 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	if e != nil || resolved.Validate(value) != nil {
 		return contracts.Fail("UPSTREAM_CHANGED", "Campus output does not match its fixed view")
 	}
-	event.Decision, event.Code, event.Bytes, event.ElapsedMS = "allow", "OK", len(raw), time.Since(started).Milliseconds()
-	if e = p.Audit.Write(event); e != nil {
-		return contracts.Fail("AUDIT_UNAVAILABLE", "Private result withheld because audit is unavailable")
-	}
-	if p.BeforePublish != nil {
-		p.BeforePublish()
-	}
-	return p.Store.PublishRead(token, scope, lease, func() error {
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		return send(raw)
-	})
+	return request.publish(ctx, token, raw, send)
 }
