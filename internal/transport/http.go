@@ -51,30 +51,7 @@ func New() *Client {
 		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 10 * time.Second,
 		MaxIdleConns: 4, MaxIdleConnsPerHost: 2, MaxConnsPerHost: 2, IdleConnTimeout: 30 * time.Second,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil || host != Host || port != "443" {
-				return nil, errors.New("destination denied")
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil {
-				return nil, err
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("no destination")
-			}
-			for _, ip := range ips {
-				if !PublicIP(ip) {
-					return nil, errors.New("destination denied")
-				}
-			}
-			dialer := net.Dialer{Timeout: 5 * time.Second}
-			for _, ip := range ips {
-				conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
-				if err == nil {
-					return conn, nil
-				}
-			}
-			return nil, errors.New("connection unavailable")
+			return dialPublic(ctx, Host, address)
 		},
 	}
 	return &Client{http: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}, slots: make(chan struct{}, 2)}
