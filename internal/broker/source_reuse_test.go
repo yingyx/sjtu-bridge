@@ -91,6 +91,18 @@ func TestSourceReuseImportsIndependentTargetWithoutGrantInheritance(t *testing.T
 	if target.identities.Load() != 2 {
 		t.Fatal("import did not independently reverify the target")
 	}
+	// Source reuse is provider-independent: importing a verified target must not
+	// turn a source grant into authority to invoke that target.
+	query := contracts.CampusQuery{AccountRef: c.AccountRef, ResourceRef: "mail:folder:inbox", View: "headers_v1", Limit: 10}
+	if _, err := invokeCampusTest(h.b, h.a, contracts.MailCapability, query); err == nil || target.calls.Load() != 0 {
+		t.Fatal("source reuse inherited a target grant")
+	}
+	if _, err := h.b.Manage(context.Background(), AdminRequest{Action: "grant", ClientID: "a", CredentialID: c.ID, Capability: contracts.MailCapability, AccountRef: c.AccountRef, Resources: []string{query.ResourceRef}, View: query.View, Limit: query.Limit}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invokeCampusTest(h.b, h.a, contracts.MailCapability, query); err != nil {
+		t.Fatal("explicit target grant unavailable", err)
+	}
 }
 
 func TestSourceReuseRejectsUnconfirmedAccountWithoutMutation(t *testing.T) {

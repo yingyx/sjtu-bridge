@@ -74,6 +74,9 @@ func (f *campusFake) Read(_ context.Context, _ []byte, _ string, q contracts.Cam
 		r.Ref, r.Sender, r.SentAt = "sjtumail:message:7", "synthetic@example.invalid", "2026-10-20T01:00:00Z"
 		r.CourseCode = "MUST_NOT_LEAK"
 		coverage = "inbox_headers_only"
+	} else if strings.HasPrefix(f.account, "activity:") {
+		r.Ref, r.Location, r.ActivityTime = "activity:event:7", "合成地点", []string{"2026-10-20 10:00:00", "2026-10-20 11:00:00"}
+		coverage = "visible_activity_summaries_only"
 	}
 	return domain.CampusPage{AccountRef: f.account, Rows: []contracts.CampusRecord{r}, Next: "SYNTHETIC_PRIVATE_NEXT", Coverage: coverage}, nil
 }
@@ -83,6 +86,8 @@ func campusSetup(t *testing.T, id string) (*harness, *campusFake, contracts.Camp
 	provider, account, resource, view := "teaching", "teaching:student:SYN0001", "teaching:term:2026:1", "schedule_v1"
 	if id == contracts.MailCapability {
 		provider, account, resource, view = "sjtumail", "sjtumail:account:synthetic-7", "mail:folder:inbox", "headers_v1"
+	} else if id == contracts.ActivityCapability {
+		provider, account, resource, view = "activity", "activity:user:SYNTHETIC_USER", "activity:feed:visible", "summaries_v1"
 	}
 	f := &campusFake{account: account}
 	h.b.Engine.CampusProviders = map[string]domain.Campus{provider: f}
@@ -103,8 +108,11 @@ func invokeCampusTest(b *Broker, token, id string, q contracts.CampusQuery) ([]b
 	e := b.invoke(context.Background(), token, contracts.Invocation{Capability: id, Input: raw}, func(v []byte) error { out = append([]byte(nil), v...); return nil })
 	return out, e
 }
-func TestCampusScopesProjectionCursorAndPersistence(t *testing.T) {
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability} {
+
+// Each fixed view has its own projection; authorization and lifecycle below
+// exercise the shared campus execution path with one representative capability.
+func TestCampusCapabilityRegistrationAndProjection(t *testing.T) {
+	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability} {
 		t.Run(id, func(t *testing.T) {
 			h, f, q, _ := campusSetup(t, id)
 			out, e := invokeCampusTest(h.b, h.a, id, q)
@@ -118,82 +126,134 @@ func TestCampusScopesProjectionCursorAndPersistence(t *testing.T) {
 			if _, e = invoke(h.b, h.a, query("summary_v1", "1")); e == nil {
 				t.Fatal("replaced Canvas grant remained active")
 			}
-			var result contracts.CampusResponse
-			if json.Unmarshal(out, &result) != nil || result.Meta.NextCursor == nil {
-				t.Fatal("missing opaque cursor")
-			}
-			cursor := *result.Meta.NextCursor
-			count := f.calls.Load()
-			for _, change := range []func(*contracts.CampusQuery){func(v *contracts.CampusQuery) { v.AccountRef += "wrong" }, func(v *contracts.CampusQuery) { v.Limit = 11 }, func(v *contracts.CampusQuery) { v.View = "body_v1" }, func(v *contracts.CampusQuery) { v.Cursor = cursor; v.Limit = 9 }} {
-				bad := q
-				change(&bad)
-				if _, e = invokeCampusTest(h.b, h.a, id, bad); e == nil {
-					t.Fatal("scope escape accepted", bad)
+			if id != contracts.MailCapability {
+				q.Query = "unsupported"
+				if _, e = invokeCampusTest(h.b, h.a, id, q); e == nil || f.calls.Load() != 1 {
+					t.Fatal("unsupported query reached provider")
 				}
 			}
-			bad := q
 			if id == contracts.TimetableCapability {
-				bad.ResourceRef = "teaching:term:2025:2"
-			} else {
-				bad.Query = "changed"
-				bad.Cursor = cursor
-			}
-			if _, e = invokeCampusTest(h.b, h.a, id, bad); e == nil {
-				t.Fatal("resource or cursor query escape accepted")
-			}
-			raw, _ := json.Marshal(q)
-			injected := append(append([]byte(nil), raw[:len(raw)-1]...), []byte(`,"confirmed":true}`)...)
-			if e = h.b.invoke(context.Background(), h.a, contracts.Invocation{Capability: id, Input: injected}, func([]byte) error { t.Fatal("forged approval published"); return nil }); e == nil {
-				t.Fatal("forged field accepted")
-			}
-			if _, e = invokeCampusTest(h.b, h.bToken, id, q); e == nil {
-				t.Fatal("other app accepted cursor/scope")
-			}
-			if f.calls.Load() != count {
-				t.Fatal("denied input reached provider")
-			}
-			q.Cursor = cursor
-			if _, e = invokeCampusTest(h.b, h.a, id, q); e != nil {
-				t.Fatal(e)
-			}
-			reopened, e := storage.Open(h.dir, h.k)
-			if e != nil {
-				t.Fatal(e)
-			}
-			defer reopened.Close()
-			restart := New(reopened, h.fake, h.b.Engine.Audit, h.b.Owner, h.b.Endpoint)
-			defer restart.Close()
-			restart.Engine.CampusProviders = h.b.Engine.CampusProviders
-			if _, e = invokeCampusTest(restart, h.a, id, q); e == nil {
-				t.Fatal("restart retained private cursor")
-			}
-			q.Cursor = ""
-			if _, e = invokeCampusTest(restart, h.a, id, q); e != nil {
-				t.Fatal("persisted grant unavailable", e)
-			}
-			f.read = func(q contracts.CampusQuery) domain.CampusPage {
-				return domain.CampusPage{AccountRef: "wrong-account", Coverage: "regular_courses_only"}
-			}
-			out, e = invokeCampusTest(h.b, h.a, id, q)
-			mustCode(t, e, "UPSTREAM_CHANGED")
-			if len(out) != 0 {
-				t.Fatal("wrong identity published")
+				q.Query, q.ResourceRef = "", "teaching:term:2025:2"
+				if _, e = invokeCampusTest(h.b, h.a, id, q); e == nil || f.calls.Load() != 1 {
+					t.Fatal("ungranted valid term reached provider")
+				}
 			}
 		})
 	}
 }
 
+func TestCampusScopesCursorAndPersistence(t *testing.T) {
+	const id = contracts.MailCapability // Also exercises the query-bound cursor.
+	h, f, q, credential := campusSetup(t, id)
+	out, e := invokeCampusTest(h.b, h.a, id, q)
+	var result contracts.CampusResponse
+	if e != nil || json.Unmarshal(out, &result) != nil || result.Meta.NextCursor == nil {
+		t.Fatal("missing opaque cursor", e)
+	}
+	cursor := *result.Meta.NextCursor
+	count := f.calls.Load()
+	for _, change := range []func(*contracts.CampusQuery){
+		func(v *contracts.CampusQuery) { v.AccountRef += "wrong" },
+		func(v *contracts.CampusQuery) { v.ResourceRef = "mail:folder:other" },
+		func(v *contracts.CampusQuery) { v.Limit = 11 },
+		func(v *contracts.CampusQuery) { v.View = "body_v1" },
+		func(v *contracts.CampusQuery) { v.Cursor = cursor; v.Limit = 9 },
+		func(v *contracts.CampusQuery) { v.Cursor = cursor; v.Query = "changed" },
+	} {
+		bad := q
+		change(&bad)
+		if _, e = invokeCampusTest(h.b, h.a, id, bad); e == nil {
+			t.Fatal("scope or cursor query escape accepted", bad)
+		}
+	}
+	raw, _ := json.Marshal(q)
+	injected := append(append([]byte(nil), raw[:len(raw)-1]...), []byte(`,"confirmed":true}`)...)
+	if e = h.b.invoke(context.Background(), h.a, contracts.Invocation{Capability: id, Input: injected}, func([]byte) error { t.Fatal("forged approval published"); return nil }); e == nil {
+		t.Fatal("forged field accepted")
+	}
+	if _, e = invokeCampusTest(h.b, h.bToken, id, q); e == nil {
+		t.Fatal("other app inherited a grant")
+	}
+	// Equal grants still do not allow one app to consume another app's cursor.
+	if _, e = h.b.Manage(context.Background(), AdminRequest{Action: "grant", ClientID: "b", CredentialID: credential, Capability: id, AccountRef: q.AccountRef, Resources: []string{q.ResourceRef}, View: q.View, Limit: q.Limit}); e != nil {
+		t.Fatal(e)
+	}
+	q.Cursor = cursor
+	if _, e = invokeCampusTest(h.b, h.bToken, id, q); e == nil {
+		t.Fatal("other app accepted cursor despite equal scope")
+	}
+	if f.calls.Load() != count {
+		t.Fatal("denied input reached provider")
+	}
+	if _, e = invokeCampusTest(h.b, h.a, id, q); e != nil {
+		t.Fatal(e)
+	}
+	reopened, e := storage.Open(h.dir, h.k)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer reopened.Close()
+	restart := New(reopened, h.fake, h.b.Engine.Audit, h.b.Owner, h.b.Endpoint)
+	defer restart.Close()
+	restart.Engine.CampusProviders = h.b.Engine.CampusProviders
+	if _, e = invokeCampusTest(restart, h.a, id, q); e == nil {
+		t.Fatal("restart retained private cursor")
+	}
+	q.Cursor = ""
+	if _, e = invokeCampusTest(restart, h.a, id, q); e != nil {
+		t.Fatal("persisted grant unavailable", e)
+	}
+	f.read = func(contracts.CampusQuery) domain.CampusPage {
+		return domain.CampusPage{AccountRef: "wrong-account", Coverage: "inbox_headers_only"}
+	}
+	out, e = invokeCampusTest(h.b, h.a, id, q)
+	mustCode(t, e, "UPSTREAM_CHANGED")
+	if len(out) != 0 {
+		t.Fatal("wrong identity published")
+	}
+}
+
 func TestCampusRevocationDuringProvider(t *testing.T) {
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability} {
-		t.Run(id, func(t *testing.T) {
-			h, f, q, _ := campusSetup(t, id)
+	const id = contracts.TimetableCapability
+	h, f, q, _ := campusSetup(t, id)
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.read = func(q contracts.CampusQuery) domain.CampusPage {
+		close(entered)
+		<-release
+		page, _ := (&campusFake{account: f.account}).Read(context.Background(), nil, f.account, q, "")
+		return page
+	}
+	done := make(chan error, 1)
+	go func() {
+		out, e := invokeCampusTest(h.b, h.a, id, q)
+		if len(out) != 0 {
+			done <- contracts.Fail("TEST_FAILURE", "revoked result published")
+			return
+		}
+		done <- e
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("provider barrier not reached")
+	}
+	_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"})
+	close(release)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = <-done; e == nil {
+		t.Fatal("provider result survived revoke")
+	}
+}
+func TestCampusRevokeAndAuditWithholdResults(t *testing.T) {
+	const id = contracts.TimetableCapability
+	for _, action := range []string{"grant_revoke", "app_revoke", "credential_remove"} {
+		t.Run(id+"/"+action, func(t *testing.T) {
+			h, _, q, credential := campusSetup(t, id)
 			entered, release := make(chan struct{}), make(chan struct{})
-			f.read = func(q contracts.CampusQuery) domain.CampusPage {
-				close(entered)
-				<-release
-				page, _ := (&campusFake{account: f.account}).Read(context.Background(), nil, f.account, q, "")
-				return page
-			}
+			h.b.Engine.BeforePublish = func() { close(entered); <-release }
 			done := make(chan error, 1)
 			go func() {
 				out, e := invokeCampusTest(h.b, h.a, id, q)
@@ -207,65 +267,31 @@ func TestCampusRevocationDuringProvider(t *testing.T) {
 			case <-entered:
 			case <-time.After(5 * time.Second):
 				close(release)
-				t.Fatal("provider barrier not reached")
+				t.Fatal("publication barrier not reached")
 			}
-			_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"})
+			_, e := h.b.Manage(context.Background(), AdminRequest{Action: action, ClientID: "a", CredentialID: credential})
 			close(release)
 			if e != nil {
 				t.Fatal(e)
 			}
 			if e = <-done; e == nil {
-				t.Fatal("provider result survived revoke")
+				t.Fatal("revoked result released")
+			}
+			h.b.Engine.BeforePublish = nil
+			if _, e = invoke(h.b, h.bToken, query("deadlines_v1", "1")); e != nil {
+				t.Fatal("independent Canvas app affected", e)
 			}
 		})
 	}
-}
-func TestCampusRevokeAndAuditWithholdResults(t *testing.T) {
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability} {
-		for _, action := range []string{"grant_revoke", "app_revoke", "credential_remove"} {
-			t.Run(id+"/"+action, func(t *testing.T) {
-				h, _, q, credential := campusSetup(t, id)
-				entered, release := make(chan struct{}), make(chan struct{})
-				h.b.Engine.BeforePublish = func() { close(entered); <-release }
-				done := make(chan error, 1)
-				go func() {
-					out, e := invokeCampusTest(h.b, h.a, id, q)
-					if len(out) != 0 {
-						done <- contracts.Fail("TEST_FAILURE", "revoked result published")
-						return
-					}
-					done <- e
-				}()
-				select {
-				case <-entered:
-				case <-time.After(5 * time.Second):
-					close(release)
-					t.Fatal("publication barrier not reached")
-				}
-				_, e := h.b.Manage(context.Background(), AdminRequest{Action: action, ClientID: "a", CredentialID: credential})
-				close(release)
-				if e != nil {
-					t.Fatal(e)
-				}
-				if e = <-done; e == nil {
-					t.Fatal("revoked result released")
-				}
-				h.b.Engine.BeforePublish = nil
-				if _, e = invoke(h.b, h.bToken, query("deadlines_v1", "1")); e != nil {
-					t.Fatal("independent Canvas app affected", e)
-				}
-			})
+	t.Run(id+"/audit", func(t *testing.T) {
+		h, _, q, _ := campusSetup(t, id)
+		h.b.Engine.Audit = failedAudit{}
+		out, e := invokeCampusTest(h.b, h.a, id, q)
+		mustCode(t, e, "AUDIT_UNAVAILABLE")
+		if len(out) != 0 {
+			t.Fatal("unaudited result published")
 		}
-		t.Run(id+"/audit", func(t *testing.T) {
-			h, _, q, _ := campusSetup(t, id)
-			h.b.Engine.Audit = failedAudit{}
-			out, e := invokeCampusTest(h.b, h.a, id, q)
-			mustCode(t, e, "AUDIT_UNAVAILABLE")
-			if len(out) != 0 {
-				t.Fatal("unaudited result published")
-			}
-		})
-	}
+	})
 }
 
 func TestCampusGrantRejectsUnavailableCredentialBeforeIdentity(t *testing.T) {
