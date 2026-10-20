@@ -5,9 +5,8 @@ package contracts
 type Operation string
 
 const (
-	Read            Operation = "read"
-	Write           Operation = "write"
-	HighImpactWrite Operation = "write_high_impact"
+	Read  Operation = "read"
+	Write Operation = "write"
 )
 
 type Delivery string
@@ -52,15 +51,19 @@ type NavigationSource struct {
 // Handoff describes an unimplemented upstream action. Authentication is human
 // guidance only; it must never prompt an agent to import a password or Cookie.
 type Handoff struct {
-	Status         string    `json:"status"`
-	ReasonCode     string    `json:"reason_code"`
-	Reason         string    `json:"reason"`
-	Authentication string    `json:"authentication"`
-	Operation      Operation `json:"operation"`
+	Status         string        `json:"status"`
+	ReasonCode     string        `json:"reason_code"`
+	Reason         string        `json:"reason"`
+	Authentication string        `json:"authentication"`
+	Operation      Operation     `json:"operation"`
+	Effects        []Effect      `json:"effects"`
+	Reversibility  Reversibility `json:"reversibility"`
+	ExecutionRule  ExecutionRule `json:"execution_rule"`
 }
 
+// IsReadOnly describes business effects only; it does not authorize execution or disclosure.
 func (c Capability) IsReadOnly() bool {
-	return c.Operation == Read && len(c.Effects) == 1 && c.Effects[0] == "none"
+	return c.Operation == Read && len(c.Effects) == 1 && c.Effects[0] == NoEffect
 }
 
 // CloneCapability protects shared discovery metadata across Engine and adapters.

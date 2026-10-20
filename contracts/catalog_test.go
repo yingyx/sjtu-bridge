@@ -21,7 +21,7 @@ func TestTaskSearchUsesOnlyAuthorizedPositiveMetadata(t *testing.T) {
 	}{
 		{"chinese task", CapabilityFilter{Query: "作业 截止时间"}, []string{AssignmentsCapability}},
 		{"english alias", CapabilityFilter{Query: "CANVAS ddl"}, []string{AssignmentsCapability}},
-		{"category and service", CapabilityFilter{Category: "学习与教学", Service: "教务处"}, []string{"public.calendars.list", "public.notices.list"}},
+		{"category and service", CapabilityFilter{Category: "学习与教学", Service: "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},
 		{"service case", CapabilityFilter{Service: "canvas"}, []string{AssignmentsCapability}},
 		{"category excludes", CapabilityFilter{Query: "作业", Category: "campus"}, []string{}},
 		{"exact id", CapabilityFilter{Query: "public.services.list"}, []string{"public.services.list"}},

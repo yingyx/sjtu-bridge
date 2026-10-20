@@ -60,7 +60,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	}
 	addDiscovery(root, out, &profile, &connection, &jsonOutput)
 	root.AddCommand(&cobra.Command{Use: "doctor", GroupID: "runtime", Short: "离线实现状态与诊断（不探测校园网站）", Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
-		return writeJSON(out, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_unverified_live", "jaccount": "diagnostic_only_persistence_not_ready", "teaching": "not_ready"}, "capabilities": len(api.Capabilities())})
+		return writeJSON(out, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_read_only", "jaccount": "portal_specific_identity_required", "teaching": "broker_timetable_read_only", "sjtumail": "broker_inbox_headers_read_only", "campusfeed": "anonymous_rss_and_dining_queries"}, "capabilities": len(api.Capabilities())})
 	})})
 	registry, err := bridge.New(bridge.Options{})
 	if err != nil {
@@ -84,13 +84,13 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 			group.AddCommand(resource)
 		}
 		var limit int
-		var cursor, inputFile string
+		var cursor, inputFile, query, canteenID string
 		var stdinJSON bool
 		command := &cobra.Command{Use: parts[2], Short: c.Title, Long: c.Description, Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
 			var raw []byte
 			var err error
 			if inputFile != "" || stdinJSON {
-				if cmd.Flags().Changed("limit") || cmd.Flags().Changed("cursor") || (inputFile != "" && stdinJSON) {
+				if cmd.Flags().Changed("limit") || cmd.Flags().Changed("cursor") || cmd.Flags().Changed("query") || cmd.Flags().Changed("canteen-id") || (inputFile != "" && stdinJSON) {
 					return contracts.Fail("INVALID_ARGUMENT", "Use flags or one JSON input source")
 				}
 				reader := input
@@ -115,7 +115,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 					return contracts.Fail("INVALID_ARGUMENT", "JSON input is empty")
 				}
 			} else {
-				raw, err = json.Marshal(contracts.ListInput{Limit: limit, Cursor: cursor})
+				raw, err = json.Marshal(contracts.ListInput{Limit: limit, Cursor: cursor, Query: query, CanteenID: canteenID})
 				if err != nil {
 					return err
 				}
@@ -152,7 +152,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 					fmt.Fprintf(out, "  %s：%s\n", field.Label, field.Value)
 				}
 				if n := item.Navigation; n != nil {
-					fmt.Fprintf(out, "  用途：%s\n  主归属：%s/%s\n  目的地：%s\n  官方后续操作：%s / %s\n  未接入原因：%s (%s)\n  官网认证：%s\n", n.Purpose, n.Primary.Category, n.Primary.TaskGroup, n.DestinationKind, n.Upstream.Status, n.Upstream.Operation, n.Upstream.Reason, n.Upstream.ReasonCode, n.Upstream.Authentication)
+					fmt.Fprintf(out, "  用途：%s\n  主归属：%s/%s\n  目的地：%s\n  官方后续操作：%s / %s / %s\n  官网动作影响：%v；可恢复性：%s（仅描述，Bridge 不执行）\n  未接入原因：%s (%s)\n  官网认证：%s\n", n.Purpose, n.Primary.Category, n.Primary.TaskGroup, n.DestinationKind, n.Upstream.Status, n.Upstream.Operation, n.Upstream.ExecutionRule, n.Upstream.Effects, n.Upstream.Reversibility, n.Upstream.Reason, n.Upstream.ReasonCode, n.Upstream.Authentication)
 					for _, path := range n.CrossListings {
 						fmt.Fprintf(out, "  交叉入口：%s/%s\n", path.Category, path.TaskGroup)
 					}
@@ -175,6 +175,12 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 		})}
 		command.Flags().IntVar(&limit, "limit", 10, "Maximum items (1-100)")
 		command.Flags().StringVar(&cursor, "cursor", "", "Opaque continuation from the same query")
+		if c.ID == "public.notices.search" {
+			command.Flags().StringVar(&query, "query", "", "在近期 RSS 标题与摘要中匹配全部关键词；不是全站搜索")
+		}
+		if c.ID == "life.dining.areas" {
+			command.Flags().StringVar(&canteenID, "canteen-id", "", "life.dining.list 返回的食堂 ID（必填）")
+		}
 		command.Flags().StringVar(&inputFile, "input-file", "", "Read business JSON from a UTF-8 file")
 		command.Flags().BoolVar(&stdinJSON, "input-json-stdin", false, "Read business JSON from stdin (not credentials)")
 		resource.AddCommand(command)

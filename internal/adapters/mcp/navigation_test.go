@@ -40,13 +40,18 @@ func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
 		if c.Delivery != contracts.NavigationDelivery {
 			continue
 		}
-		if !c.IsReadOnly() || len(c.Credentials) != 0 || c.TaskGroup == "" {
+		if !c.IsReadOnly() || c.Reversibility != contracts.NotApplicable || c.ExecutionRule != contracts.PublicExecution || len(c.Credentials) != 0 || c.TaskGroup == "" {
 			t.Fatal("invalid navigation metadata", c)
 		}
 		domains[c.Category] = true
 		want, err := api.Invoke(ctx, contracts.Invocation{Capability: c.ID, Input: json.RawMessage(`{"limit":2}`)})
 		if err != nil {
 			t.Fatal(c.ID, err)
+		}
+		for _, item := range want.Data.Items {
+			if item.Navigation == nil || item.Navigation.Upstream.ExecutionRule != contracts.ManualExecution {
+				t.Fatal("navigation exposes an executable upstream action", c.ID, item)
+			}
 		}
 		var out, diag bytes.Buffer
 		args := append(strings.Split(c.ID, "."), "--limit", "2", "--json")
@@ -68,7 +73,7 @@ func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
 		}
 		out.Reset()
 		diag.Reset()
-		if cli.Execute(ctx, strings.Split(c.ID, "."), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官方后续操作") || !strings.Contains(diag.String(), "NAVIGATION_ONLY") {
+		if cli.Execute(ctx, strings.Split(c.ID, "."), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官方后续操作") || !strings.Contains(out.String(), "manual_only") || !strings.Contains(out.String(), "Bridge 不执行") || !strings.Contains(diag.String(), "NAVIGATION_ONLY") {
 			t.Fatal("text output conceals manual boundary", out.String(), diag.String())
 		}
 	}

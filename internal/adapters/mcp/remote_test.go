@@ -48,19 +48,28 @@ func (api *remoteStub) Invoke(_ context.Context, invocation contracts.Invocation
 }
 
 func remoteCapabilities() []contracts.Capability {
-	ids := []string{"public.services.list", "public.calendars.list", "public.notices.list", contracts.AssignmentsCapability}
-	caps := make([]contracts.Capability, 0, len(ids))
-	for _, id := range ids {
-		caps = append(caps, contracts.Capability{
-			ID: id, ContractVersion: "1", Title: "查询校园信息", Description: "查询可见信息；不支持提交或修改。",
-			Category: "academic", CategoryLabel: "教务与学习", Service: "合成测试服务",
-			Aliases: []string{"查作业", "查询截止日期"}, Keywords: []string{"deadline", "assignment"},
-			DataClass: "public", Effects: []string{"none"}, Authorized: true,
-			Operation: contracts.Read, Delivery: contracts.QueryDelivery,
-			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
-		})
+	caps := []contracts.Capability{}
+	for _, id := range []string{"public.services.list", "public.calendars.list", "public.notices.list"} {
+		for _, c := range contracts.PublicCapabilities() {
+			if c.ID == id {
+				caps = append(caps, c)
+			}
+		}
 	}
-	caps[len(caps)-1].DataClass = "personal"
+	caps = append(caps, contracts.AssignmentCapability("test-account", []string{"test-course"}, "summary_v1", 10))
+	for i := range caps {
+		caps[i].Title = "查询校园信息"
+		caps[i].Description = "查询可见信息；不支持提交或修改。"
+		caps[i].Category = "academic"
+		caps[i].CategoryLabel = "教务与学习"
+		caps[i].Service = "合成测试服务"
+		caps[i].Aliases = []string{"查作业", "查询截止日期"}
+		caps[i].Keywords = []string{"deadline", "assignment"}
+		caps[i].Authorized = true
+		// These tests exercise catalog dispatch, not the business input schemas.
+		caps[i].InputSchema = json.RawMessage(`{"type":"object"}`)
+		caps[i].OutputSchema = json.RawMessage(`{"type":"object"}`)
+	}
 	caps[len(caps)-1].Service = "Canvas"
 	return caps
 }
@@ -116,13 +125,17 @@ func TestRemoteMixedCatalogMetadataAndDispatch(t *testing.T) {
 		if tool.Title != "查询校园信息" || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("missing title or read-only hint: %+v", tool)
 		}
-		for _, text := range []string{"不支持提交或修改", "教务与学习", "academic", "查作业", "查询截止日期", "deadline", "assignment"} {
+		for _, text := range []string{"不支持提交或修改", "教务与学习", "academic", "查作业", "查询截止日期", "deadline", "assignment", "影响：[none]", "可恢复性：not_applicable", "annotations 仅为提示，不授予权限", "写入和可信审批执行流程尚未实现"} {
 			if !strings.Contains(tool.Description, text) {
 				t.Fatalf("%s missing discovery metadata %q: %s", tool.Name, text, tool.Description)
 			}
 		}
-		if tool.Name == "canvas_assignments_list" && !strings.Contains(tool.Description, "Canvas") {
-			t.Fatal("personal service name absent")
+		if tool.Name == "canvas_assignments_list" {
+			if !strings.Contains(tool.Description, "Canvas") || !strings.Contains(tool.Description, "数据分类：personal") || !strings.Contains(tool.Description, "执行规则：grant") {
+				t.Fatal("personal safety metadata absent", tool.Description)
+			}
+		} else if !strings.Contains(tool.Description, "数据分类：public") || !strings.Contains(tool.Description, "执行规则：public") {
+			t.Fatal("public safety metadata absent", tool.Description)
 		}
 	}
 	for _, capability := range caps {
@@ -231,18 +244,27 @@ func TestRemoteDiscoveryFailureClearsAllToolsAndCanRecover(t *testing.T) {
 func TestRemoteRefreshAddsNewServiceWithoutAdapterChanges(t *testing.T) {
 	api := &remoteStub{capabilities: remoteCapabilities()[:1]}
 	ctx, session := connectRemote(t, api)
-	additional := remoteCapabilities()[0]
-	additional.ID = "library.hours.list"
-	additional.Title = "查询图书馆开放时间"
-	additional.Service = "图书馆"
+	var additional contracts.Capability
+	for _, capability := range contracts.PublicCapabilities() {
+		if capability.ID == "library.borrowing.list" {
+			additional = capability
+			additional.Authorized = true
+			additional.InputSchema = json.RawMessage(`{"type":"object"}`)
+			additional.OutputSchema = json.RawMessage(`{"type":"object"}`)
+			break
+		}
+	}
+	if additional.ID == "" {
+		t.Fatal("reviewed library capability missing")
+	}
 	api.mu.Lock()
 	api.capabilities = append(api.capabilities, additional)
 	api.mu.Unlock()
 	listed, err := session.ListTools(ctx, nil)
-	if err != nil || !reflect.DeepEqual(toolNames(listed.Tools), []string{"library_hours_list", "public_services_list"}) {
+	if err != nil || !reflect.DeepEqual(toolNames(listed.Tools), []string{"library_borrowing_list", "public_services_list"}) {
 		t.Fatalf("new service not discovered: %v / %v", listed, err)
 	}
-	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "library_hours_list", Arguments: map[string]any{}})
+	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "library_borrowing_list", Arguments: map[string]any{}})
 	if err != nil || result.IsError || result.StructuredContent.(map[string]any)["capability"] != additional.ID {
 		t.Fatalf("new service not dispatched: %v / %v", result, err)
 	}

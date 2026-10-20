@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/policy"
 )
 
 type API interface {
@@ -19,7 +21,7 @@ type API interface {
 func New(api API) *sdk.Server {
 	server := sdk.NewServer(&sdk.Implementation{Name: "sjtu-bridge", Version: "0.3.0"}, nil)
 	for _, capability := range api.Capabilities() {
-		if !capability.Authorized {
+		if !capability.Authorized || !policy.ExecutableRead(capability) {
 			continue
 		}
 		server.AddTool(capabilityTool(capability), func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -52,8 +54,9 @@ func capabilityTool(capability contracts.Capability) *sdk.Tool {
 		description = append(description, "服务："+capability.Service)
 	}
 	description = append(description, "任务组："+capability.TaskGroupLabel+" ("+capability.TaskGroup+")", "Bridge 操作："+string(capability.Operation)+"；交付："+string(capability.Delivery))
+	description = append(description, fmt.Sprintf("数据分类：%s；影响：%v；可恢复性：%s；执行规则：%s", capability.DataClass, capability.Effects, capability.Reversibility, capability.ExecutionRule), "首版仅开放审核过的业务只读能力；annotations 仅为提示，不授予权限。写入和可信审批执行流程尚未实现。")
 	if capability.Delivery == contracts.NavigationDelivery {
-		description = append(description, "此工具定位官方目的地；不是数据查询。相关可调用能力、任务归属、入口依据和未接入原因见 navigation；本次不探测链接，不复制操作教程。")
+		description = append(description, "此工具定位官方目的地；不是数据查询。相关可调用能力、任务归属、入口依据和未接入原因见 navigation；本次不探测链接，不复制操作教程。navigation.upstream 仅描述需要用户在官网自行处理的动作，不是可调用工具或审批入口。")
 	}
 	for _, path := range capability.CrossListings {
 		description = append(description, "交叉入口："+path.Category+"/"+path.TaskGroup)

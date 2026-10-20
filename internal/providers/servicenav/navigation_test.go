@@ -18,17 +18,35 @@ func TestNavigationRoutesWithoutCopyingRules(t *testing.T) {
 	}
 	for id := range entries {
 		first, err := (Provider{}).List(context.Background(), id, contracts.ListInput{Limit: 1})
-		if err != nil || !first.Meta.HasMore || first.Meta.Completeness != "partial" || first.Meta.Sources[0].Status != "bundled" || first.Warnings[0].Code != "NAVIGATION_ONLY" {
+		if err != nil || first.Meta.HasMore != (len(entries[id]) > 1) || first.Meta.Completeness != "partial" || first.Meta.Sources[0].Status != "bundled" || first.Warnings[0].Code != "NAVIGATION_ONLY" {
 			t.Fatal(id, first, err)
 		}
-		second, err := (Provider{}).List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *first.Meta.NextCursor})
-		if err != nil || second.Meta.HasMore {
-			t.Fatal(second, err)
+		second := contracts.Response{}
+		if first.Meta.HasMore {
+			second, err = (Provider{}).List(context.Background(), id, contracts.ListInput{Limit: 1, Cursor: *first.Meta.NextCursor})
+			if err != nil || second.Meta.HasMore {
+				t.Fatal(second, err)
+			}
 		}
 		for _, i := range append(first.Data.Items, second.Data.Items...) {
 			n := i.Navigation
 			if n == nil || n.Purpose == "" || n.Primary.Category == "" || n.DestinationKind == "" || len(n.Sources) == 0 || n.VerifiedAt == "" || n.LinkCheckedThisCall || n.Upstream.Status != "link_only" || n.Upstream.ReasonCode == "" || n.Upstream.Authentication == "" {
 				t.Fatal(id, i)
+			}
+			if n.Upstream.ExecutionRule != contracts.ManualExecution || len(n.Upstream.Effects) == 0 {
+				t.Fatal("upstream action must remain manual and explicit", id, n.Upstream)
+			}
+			switch n.Upstream.Operation {
+			case contracts.Read:
+				if n.Upstream.Reversibility != contracts.NotApplicable || len(n.Upstream.Effects) != 1 || n.Upstream.Effects[0] != contracts.NoEffect {
+					t.Fatal("read navigation has business side effects", id, n.Upstream)
+				}
+			case contracts.Write:
+				if n.Upstream.Reversibility != contracts.UnknownReversibility {
+					t.Fatal("upstream recoverability was not verified", id, n.Upstream)
+				}
+			default:
+				t.Fatal("unknown upstream operation", id, n.Upstream)
 			}
 			for _, related := range n.RelatedCapabilities {
 				if !known[related] {
@@ -42,6 +60,7 @@ func TestNavigationRoutesWithoutCopyingRules(t *testing.T) {
 		}
 		n := first.Data.Items[0].Navigation
 		n.Sources[0].URL = "changed"
+		n.Upstream.Effects[0] = contracts.Effect("changed")
 		if len(n.CrossListings) > 0 {
 			n.CrossListings[0].Category = "changed"
 		}

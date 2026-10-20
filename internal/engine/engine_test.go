@@ -12,7 +12,7 @@ import (
 )
 
 func definition(handler Handler) Definition {
-	return Definition{Capability: contracts.Capability{ID: "public.services.list", ContractVersion: "1", Provider: "publicinfo", DataClass: "public", Effects: []string{"none"}, Operation: contracts.Read, Delivery: contracts.QueryDelivery, Credentials: []string{}}, Handler: handler}
+	return Definition{Capability: contracts.Capability{ID: "public.services.list", ContractVersion: "1", Provider: "publicinfo", DataClass: "public", Effects: []contracts.Effect{contracts.NoEffect}, Reversibility: contracts.NotApplicable, ExecutionRule: contracts.PublicExecution, Operation: contracts.Read, Delivery: contracts.QueryDelivery, Credentials: []string{}}, Handler: handler}
 }
 func empty(context.Context, contracts.ListInput) (contracts.Response, error) {
 	return contracts.Response{Data: contracts.Data{Items: []contracts.Item{}}, Meta: contracts.Meta{Sources: []contracts.Source{}, Completeness: "complete"}}, nil
@@ -42,13 +42,19 @@ func TestDenyBeforeProvider(t *testing.T) {
 		check(t, err, "PERMISSION_DENIED")
 	}
 	for _, mutate := range []func(*contracts.Capability){
-		func(c *contracts.Capability) { c.Effects = []string{"remote_write"} },
+		func(c *contracts.Capability) { c.Effects = []contracts.Effect{contracts.CommunicationEffect} },
 		func(c *contracts.Capability) { c.DataClass = "personal" },
 		func(c *contracts.Capability) { c.ID = "public.new.list" },
 		func(c *contracts.Capability) { c.ContractVersion = "2" },
 		func(c *contracts.Capability) { c.Provider = "other" },
 		func(c *contracts.Capability) { c.Operation = contracts.Write },
-		func(c *contracts.Capability) { c.Operation = contracts.HighImpactWrite },
+		func(c *contracts.Capability) { c.Reversibility = contracts.UnknownReversibility },
+		func(c *contracts.Capability) { c.Reversibility = "" },
+		func(c *contracts.Capability) { c.ExecutionRule = contracts.ConfirmExecution },
+		func(c *contracts.Capability) { c.ExecutionRule = contracts.ManualExecution },
+		func(c *contracts.Capability) { c.ExecutionRule = contracts.DisabledExecution },
+		func(c *contracts.Capability) { c.ExecutionRule = "" },
+		func(c *contracts.Capability) { c.Credentials = nil },
 		func(c *contracts.Capability) { c.Operation = "" },
 		func(c *contracts.Capability) { c.Operation = "future_operation" },
 		func(c *contracts.Capability) { c.Delivery = contracts.NavigationDelivery },
@@ -62,6 +68,9 @@ func TestDenyBeforeProvider(t *testing.T) {
 		}
 		_, err = eng.Invoke(context.Background(), contracts.Invocation{Capability: copy.Capability.ID})
 		check(t, err, "PERMISSION_DENIED")
+		if len(eng.Capabilities()) != 0 {
+			t.Fatal("denied capability advertised in discovery")
+		}
 	}
 	if calls != 0 {
 		t.Fatal("denied calls reached provider")
@@ -80,7 +89,7 @@ func TestStrictInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`null`, `[]`, `{"role":"admin"}`, `{"profile":"study"}`, `{"confirmed":true}`, `{"limit":0}`, `{"limit":-1}`, `{"limit":101}`, `{"limit":"10"}`, `{"cursor":null}`, `{} {}`, `{"limit":1.1}`} {
+	for _, raw := range []string{`null`, `[]`, `{"role":"admin"}`, `{"profile":"study"}`, `{"confirmed":true}`, `{"approval":"accepted"}`, `{"execution_rule":"public"}`, `{"effects":["none"]}`, `{"limit":0}`, `{"limit":-1}`, `{"limit":101}`, `{"limit":"10"}`, `{"cursor":null}`, `{} {}`, `{"limit":1.1}`} {
 		_, err := e.Invoke(context.Background(), contracts.Invocation{Capability: "public.services.list", Input: json.RawMessage(raw)})
 		check(t, err, "INVALID_ARGUMENT")
 	}

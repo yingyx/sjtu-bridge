@@ -24,7 +24,7 @@ type Definition struct {
 type Engine struct {
 	profile     string
 	definitions map[string]Definition
-	input       *jsonschema.Resolved
+	input       map[string]*jsonschema.Resolved
 	output      *jsonschema.Resolved
 }
 
@@ -39,19 +39,7 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 	if profile != "public" {
 		return nil, contracts.Fail("PERMISSION_DENIED", "Only the public profile is implemented")
 	}
-	in, err := jsonschema.For[contracts.ListInput](nil)
-	if err != nil {
-		return nil, err
-	}
-	minimum, maximum, cursorLength := float64(1), float64(100), 4096
-	in.Properties["limit"].Minimum = &minimum
-	in.Properties["limit"].Maximum = &maximum
-	in.Properties["cursor"].MaxLength = &cursorLength
 	out, err := jsonschema.For[contracts.Response](nil)
-	if err != nil {
-		return nil, err
-	}
-	inJSON, err := json.Marshal(in)
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +47,11 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	ri, err := in.Resolve(nil)
-	if err != nil {
-		return nil, err
-	}
 	ro, err := out.Resolve(nil)
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{profile: profile, definitions: map[string]Definition{}, input: ri, output: ro}
+	e := &Engine{profile: profile, definitions: map[string]Definition{}, input: map[string]*jsonschema.Resolved{}, output: ro}
 	for _, d := range definitions {
 		if d.Handler == nil || d.Capability.ID == "" {
 			return nil, errors.New("invalid capability registration")
@@ -75,6 +59,17 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 		if _, ok := e.definitions[d.Capability.ID]; ok {
 			return nil, errors.New("duplicate capability registration")
 		}
+		// Each tool advertises and accepts only its reviewed business filters.
+		inJSON := contracts.PublicInputSchema(d.Capability.ID)
+		var local jsonschema.Schema
+		if err := json.Unmarshal(inJSON, &local); err != nil {
+			return nil, err
+		}
+		ri, err := local.Resolve(nil)
+		if err != nil {
+			return nil, err
+		}
+		e.input[d.Capability.ID] = ri
 		d.Capability.InputSchema = inJSON
 		d.Capability.OutputSchema = outJSON
 		d.Capability = contracts.CloneCapability(d.Capability)
@@ -86,9 +81,11 @@ func New(profile string, definitions []Definition) (*Engine, error) {
 func (e *Engine) Capabilities() []contracts.Capability {
 	result := make([]contracts.Capability, 0, len(e.definitions))
 	for _, d := range e.definitions {
+		if !e.allowed(d.Capability, "") {
+			continue
+		}
 		c := contracts.CloneCapability(d.Capability)
-		account := ""
-		c.Authorized = e.allowed(c, account)
+		c.Authorized = true
 		result = append(result, c)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -134,13 +131,13 @@ func (e *Engine) Invoke(ctx context.Context, invocation contracts.Invocation) (r
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		return result, contracts.Fail("INVALID_ARGUMENT", "Expected a list query with limit and cursor only")
+		return result, contracts.Fail("INVALID_ARGUMENT", "Expected a query matching the capability schema")
 	}
 	if decoder.Decode(new(any)) != io.EOF {
 		return result, contracts.Fail("INVALID_ARGUMENT", "Expected one JSON object")
 	}
 	var value any
-	if json.Unmarshal(raw, &value) != nil || e.input.Validate(value) != nil {
+	if json.Unmarshal(raw, &value) != nil || e.input[d.Capability.ID].Validate(value) != nil {
 		return result, contracts.Fail("INVALID_ARGUMENT", "Input does not match the capability schema")
 	}
 	if input.Limit == 0 {

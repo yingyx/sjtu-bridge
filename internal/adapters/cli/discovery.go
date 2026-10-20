@@ -60,7 +60,7 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 				return nil
 			}
 			for _, c := range caps {
-				fmt.Fprintf(out, "%s\t%s\n  %s (%s) / %s / %s\n  %s; %s\n  %s\n", c.ID, c.Title, c.CategoryLabel, c.Category, c.TaskGroupLabel, c.Service, c.Operation, c.Delivery, c.Description)
+				fmt.Fprintf(out, "%s\t%s\n  %s (%s) / %s / %s\n  %s; %s; data=%s; effects=%v; reversibility=%s; execution=%s\n  %s\n", c.ID, c.Title, c.CategoryLabel, c.Category, c.TaskGroupLabel, c.Service, c.Operation, c.Delivery, c.DataClass, c.Effects, c.Reversibility, c.ExecutionRule, c.Description)
 			}
 			fmt.Fprintln(out, "使用 sjtu capabilities describe ID 查看完整参数和返回字段。")
 			return nil

@@ -13,7 +13,7 @@ import (
 	"github.com/yingyx/sjtu-bridge/contracts"
 )
 
-const revision = "2026-10-19-navigation-v2"
+const revision = "2026-10-20-navigation-v4"
 
 type Provider struct{}
 
@@ -58,6 +58,7 @@ func (Provider) List(ctx context.Context, capability string, input contracts.Lis
 		g.CrossListings = append([]contracts.TaskPath{}, g.CrossListings...)
 		g.RelatedCapabilities = append([]string{}, g.RelatedCapabilities...)
 		g.Sources = append([]contracts.NavigationSource{}, g.Sources...)
+		g.Upstream.Effects = append([]contracts.Effect{}, g.Upstream.Effects...)
 		item.Navigation = &g
 		page = append(page, item)
 		for _, source := range g.Sources {

@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/policy"
 )
 
 type RemoteAPI interface {
@@ -44,7 +45,7 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 		}
 		clear()
 		for _, c := range caps {
-			if !c.Authorized {
+			if !c.Authorized || !policy.ExecutableRead(c) {
 				continue
 			}
 			tool := capabilityTool(c)

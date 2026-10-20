@@ -16,8 +16,10 @@ type Invocation struct {
 }
 
 type ListInput struct {
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum items per call (1-100), default 10"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque continuation from the same capability and limit; expires after 15 minutes"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum items per call (1-100), default 10"`
+	Cursor    string `json:"cursor,omitempty" jsonschema:"Opaque continuation from the same capability and limit; expires after 15 minutes"`
+	Query     string `json:"query,omitempty" jsonschema:"Keywords matched against recent RSS titles and summaries only"`
+	CanteenID string `json:"canteen_id,omitempty" jsonschema:"Reviewed parent canteen ID returned by life.dining.list"`
 }
 
 type Item struct {
@@ -86,9 +88,11 @@ type Capability struct {
 	CLICommand      string          `json:"cli_command"`
 	MCPTool         string          `json:"mcp_tool"`
 	Description     string          `json:"description"`
-	DataClass       string          `json:"data_class"`
-	Effects         []string        `json:"effects"`
+	DataClass       DataClass       `json:"data_class"`
+	Effects         []Effect        `json:"effects"`
 	Operation       Operation       `json:"operation"`
+	Reversibility   Reversibility   `json:"reversibility"`
+	ExecutionRule   ExecutionRule   `json:"execution_rule"`
 	Delivery        Delivery        `json:"delivery"`
 	Credentials     []string        `json:"credentials"`
 	Provider        string          `json:"provider"`

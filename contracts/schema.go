@@ -19,7 +19,7 @@ func AssignmentCapability(account string, courses []string, view string, limit i
 	output := object(map[string]any{"schema_version": map[string]any{"const": "1"}, "request_id": str, "data": object(map[string]any{"items": map[string]any{"type": "array", "maxItems": limit, "items": object(props, required)}}, []string{"items"}), "meta": object(map[string]any{"provider": map[string]any{"const": "canvas"}, "coverage": map[string]any{"enum": []string{"complete", "page"}}, "fetched_at": str, "next_cursor": nullable, "has_more": map[string]any{"type": "boolean"}}, []string{"provider", "coverage", "fetched_at", "next_cursor", "has_more"})}, []string{"schema_version", "request_id", "data", "meta"})
 	in, _ := json.Marshal(input)
 	out, _ := json.Marshal(output)
-	c := assignmentMetadata()
+	c := AssignmentMetadata()
 	c.Authorized, c.InputSchema, c.OutputSchema = true, in, out
 	return c
 }
