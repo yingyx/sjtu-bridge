@@ -131,7 +131,8 @@ func (s *Service) Identity(ctx context.Context, secret []byte) (string, error) {
 // Read sends no room selector. The balance endpoint implicitly refers to the
 // authenticated user's binding, which is rechecked before and after the read.
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
-	if q.AccountRef != account || !strings.HasPrefix(account, "electric:user:") || !accountID.MatchString(strings.TrimPrefix(account, "electric:user:")) || !strings.HasPrefix(q.ResourceRef, "electric:room:") || !roomID.MatchString(strings.TrimPrefix(q.ResourceRef, "electric:room:")) || q.View != View || q.Query != "" || q.Limit != 1 || q.Cursor != "" || next != "" {
+	rules, _ := contracts.CampusRules(contracts.ElectricityBalanceCapability)
+	if q.AccountRef != account || !strings.HasPrefix(account, "electric:user:") || !accountID.MatchString(strings.TrimPrefix(account, "electric:user:")) || !rules.ValidQuery(q) || next != "" {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Expected one fixed-view bound-room electricity balance")
 	}
 	x, e := s.login(ctx, secret)

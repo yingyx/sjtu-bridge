@@ -148,7 +148,8 @@ func parse(body []byte, resource, year, xqm string) ([]contracts.CampusRecord, s
 // Read refetches the same bounded term, verifies its identity, and binds offset
 // pagination to the returned snapshot. No personal response is cached.
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
-	if q.AccountRef != account || q.View != "schedule_v1" || q.Query != "" || q.Limit < 1 || q.Limit > 100 || len(next) > 128 {
+	rules, _ := contracts.CampusRules(contracts.TimetableCapability)
+	if q.AccountRef != account || !rules.ValidQuery(q) || len(next) > 128 {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Expected an own-account fixed-view timetable query")
 	}
 	rows, actual, e := s.fetch(ctx, secret, q.ResourceRef)

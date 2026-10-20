@@ -16,7 +16,7 @@ import (
 
 const Host = "elec.sjtu.edu.cn"
 const Capability = "life.electricity.balance"
-const View = "balance_v1"
+const View = contracts.ElectricBalanceView
 const clientID = "t7goflZ2Hhc6dYFfKpMf"
 const rootURL = "https://elec.sjtu.edu.cn/"
 const infoURL = rootURL + "api/me/info"

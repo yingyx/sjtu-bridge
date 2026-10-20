@@ -22,7 +22,7 @@ import (
 
 const Host = "activity.sjtu.edu.cn"
 const Resource = "activity:feed:visible"
-const View = "summaries_v1"
+const View = contracts.ActivitySummariesView
 const clientID = "NMCTdJI6Tluw2SSTe6tW"
 const callback = "https://activity.sjtu.edu.cn/auth"
 const api = "https://activity.sjtu.edu.cn/api/v1"
@@ -124,7 +124,8 @@ func snapshot(rows []contracts.CampusRecord, total int) string {
 // Read returns one bounded page. Continuations recheck the first-page anchor;
 // the upstream provides no transactional snapshot across later pages.
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
-	if q.AccountRef != account || !strings.HasPrefix(account, "activity:user:") || q.ResourceRef != Resource || q.View != View || q.Query != "" || q.Limit < 1 || q.Limit > 20 || len(next) > 128 {
+	rules, _ := contracts.CampusRules(contracts.ActivityCapability)
+	if q.AccountRef != account || !strings.HasPrefix(account, "activity:user:") || !rules.ValidQuery(q) || len(next) > 128 {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Expected an own-account fixed activity feed query")
 	}
 	pageNumber, expected := 1, ""

@@ -75,35 +75,6 @@ func validGrant(g Grant) bool {
 	if g.Capability == contracts.AssignmentsCapability {
 		return (g.View == "summary_v1" || g.View == "deadlines_v1") && len(g.Courses) > 0 && len(g.Resources) == 0
 	}
-	if len(g.Courses) != 0 || len(g.Resources) < 1 || len(g.Resources) > 8 {
-		return false
-	}
-	switch g.Capability {
-	case contracts.TimetableCapability:
-		if g.View != "schedule_v1" {
-			return false
-		}
-	case contracts.MailCapability:
-		if g.View != "headers_v1" || g.Limit > 50 {
-			return false
-		}
-	case contracts.ActivityCapability:
-		if g.View != "summaries_v1" || g.Limit > 20 {
-			return false
-		}
-	case contracts.ElectricityBalanceCapability:
-		if g.View != "balance_v1" || g.Limit != 1 || len(g.Resources) != 1 {
-			return false
-		}
-	default:
-		return false
-	}
-	seen := map[string]bool{}
-	for _, r := range g.Resources {
-		if !contracts.ValidCampusResource(g.Capability, r) || seen[r] {
-			return false
-		}
-		seen[r] = true
-	}
-	return true
+	rules, known := contracts.CampusRules(g.Capability)
+	return known && len(g.Courses) == 0 && rules.ValidGrant(g.View, g.Limit, g.Resources)
 }

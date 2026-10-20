@@ -23,30 +23,9 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	if e := b.Store.CheckSourceCredential(credential); e != nil {
 		return nil, e
 	}
-	view := "schedule_v1"
-	maxLimit := 100
-	if q.Capability == contracts.MailCapability {
-		view = "headers_v1"
-		maxLimit = 50
-	} else if q.Capability == contracts.ActivityCapability {
-		view = "summaries_v1"
-		maxLimit = 20
-	} else if q.Capability == contracts.ElectricityBalanceCapability {
-		view = "balance_v1"
-		maxLimit = 1
-	}
-	if q.View != view || q.Limit < 1 || q.Limit > maxLimit || len(q.Resources) < 1 || len(q.Resources) > 8 || len(q.Courses) != 0 {
+	rules, known := contracts.CampusRules(q.Capability)
+	if !known || len(q.Courses) != 0 || !rules.ValidGrant(q.View, q.Limit, q.Resources) {
 		return nil, contracts.Fail("INVALID_ARGUMENT", "Choose explicit resources, a fixed view, and bounded limit")
-	}
-	if q.Capability == contracts.ElectricityBalanceCapability && len(q.Resources) != 1 {
-		return nil, contracts.Fail("INVALID_ARGUMENT", "Choose exactly the verified bound room")
-	}
-	seen := map[string]bool{}
-	for _, resource := range q.Resources {
-		if !contracts.ValidCampusResource(q.Capability, resource) || seen[resource] {
-			return nil, contracts.Fail("INVALID_ARGUMENT", "Unsupported or duplicate portal resource")
-		}
-		seen[resource] = true
 	}
 	// This identity check does not enumerate mailbox contents or grant a domain.
 	e := b.Engine.Do(ctx, func(ctx context.Context) error {

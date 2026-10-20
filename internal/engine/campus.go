@@ -25,25 +25,20 @@ var electricAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 
 func parseCampus(id string, raw []byte) (contracts.CampusQuery, error) {
 	var q contracts.CampusQuery
+	rules, known := contracts.CampusRules(id)
 	var fields map[string]json.RawMessage
-	if len(raw) > contracts.MaxJSONBytes || json.Unmarshal(raw, &fields) != nil || fields == nil {
+	if !known || len(raw) > contracts.MaxJSONBytes || json.Unmarshal(raw, &fields) != nil || fields == nil {
 		return q, contracts.Fail("INVALID_ARGUMENT", "Expected a campus query object")
 	}
 	for key, value := range fields {
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || (key == "query" && id != contracts.MailCapability) {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || (key == "query" && !rules.QueryAllowed) {
 			return q, contracts.Fail("INVALID_ARGUMENT", "Unsupported campus query field or null value")
 		}
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if len(raw) > contracts.MaxJSONBytes || d.Decode(&q) != nil || d.Decode(new(any)) != io.EOF || !contracts.ValidCampusResource(id, q.ResourceRef) || q.AccountRef == "" || len(q.AccountRef) > 128 || q.Limit < 1 || q.Limit > 100 || len(q.Cursor) > 64 || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
+	if len(raw) > contracts.MaxJSONBytes || d.Decode(&q) != nil || d.Decode(new(any)) != io.EOF || !rules.ValidQuery(q) || q.AccountRef == "" || len(q.AccountRef) > 128 || len(q.Cursor) > 64 || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
 		return q, contracts.Fail("INVALID_ARGUMENT", "Expected a bounded fixed-view campus query")
-	}
-	if (id == contracts.TimetableCapability && (q.Query != "" || q.View != "schedule_v1")) || (id == contracts.MailCapability && (q.Limit > 50 || q.View != "headers_v1")) || (id == contracts.ActivityCapability && (q.Query != "" || q.Limit > 20 || q.View != "summaries_v1")) {
-		return q, contracts.Fail("INVALID_ARGUMENT", "Unsupported campus query view or filter")
-	}
-	if id == contracts.ElectricityBalanceCapability && (q.Query != "" || q.Limit != 1 || q.View != "balance_v1" || q.Cursor != "") {
-		return q, contracts.Fail("INVALID_ARGUMENT", "Electricity balance requires one bound-room fixed view without pagination")
 	}
 	return q, nil
 }
@@ -119,15 +114,8 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	expectedCoverage := "regular_courses_only"
-	if inv.Capability == contracts.MailCapability {
-		expectedCoverage = "inbox_headers_only"
-	} else if inv.Capability == contracts.ActivityCapability {
-		expectedCoverage = "visible_activity_summaries_only"
-	} else if inv.Capability == contracts.ElectricityBalanceCapability {
-		expectedCoverage = "bound_room_balance_only"
-	}
-	if page.AccountRef != scope.AccountRef || len(page.Rows) > q.Limit || len(page.Next) > 8192 || page.Coverage != expectedCoverage {
+	rules, _ := contracts.CampusRules(inv.Capability)
+	if page.AccountRef != scope.AccountRef || len(page.Rows) > q.Limit || len(page.Next) > 8192 || page.Coverage != rules.Coverage {
 		return contracts.Fail("UPSTREAM_CHANGED", "Campus result exceeded the authorized scope")
 	}
 	if inv.Capability == contracts.ElectricityBalanceCapability && (len(page.Rows) != 1 || page.Next != "") {

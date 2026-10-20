@@ -56,35 +56,22 @@ func PersonalMetadata(id string) (Capability, bool) {
 }
 func CampusCapability(id, account string, resources []string, view string, limit int) (Capability, bool) {
 	c, ok := PersonalMetadata(id)
-	if !ok || (id != TimetableCapability && id != MailCapability && id != ActivityCapability && id != ElectricityBalanceCapability) {
+	rules, known := CampusRules(id)
+	if !ok || !known || !utf8.ValidString(account) || account == "" || len(account) > 128 || !rules.ValidGrant(view, limit, resources) {
 		return Capability{}, false
-	}
-	if !utf8.ValidString(account) || account == "" || len(account) > 128 || limit < 1 || limit > 100 || len(resources) < 1 || len(resources) > 8 {
-		return Capability{}, false
-	}
-	if (id == TimetableCapability && view != "schedule_v1") || (id == MailCapability && (view != "headers_v1" || limit > 50)) || (id == ActivityCapability && (view != "summaries_v1" || limit > 20)) {
-		return Capability{}, false
-	}
-	if id == ElectricityBalanceCapability && (view != "balance_v1" || limit != 1 || len(resources) != 1) {
-		return Capability{}, false
-	}
-	for _, r := range resources {
-		if !ValidCampusResource(id, r) {
-			return Capability{}, false
-		}
 	}
 	props := map[string]any{"account_ref": map[string]any{"type": "string", "enum": []string{account}}, "resource_ref": map[string]any{"type": "string", "enum": resources}, "view": map[string]any{"type": "string", "enum": []string{view}}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": limit}, "cursor": map[string]any{"type": "string", "maxLength": 64}}
-	if id == MailCapability {
+	if rules.QueryAllowed {
 		props["query"] = map[string]any{"type": "string", "maxLength": 128, "description": "Literal subject keywords only, all terms must match; no IMAP/Zimbra query syntax or message body search"}
 	}
-	if id == ElectricityBalanceCapability {
+	if !rules.Paginated {
 		props["cursor"] = map[string]any{"type": "string", "enum": []string{""}}
 	}
 	c.InputSchema, _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": []string{"account_ref", "resource_ref", "view", "limit"}})
 	str := map[string]any{"type": "string", "maxLength": 2048}
 	rowProps := map[string]any{"resource_ref": map[string]any{"type": "string", "enum": resources}, "record_ref": str, "title": str}
 	required := []string{"resource_ref", "record_ref", "title"}
-	coverage := "regular_courses_only"
+	coverage := rules.Coverage
 	if id == TimetableCapability {
 		for _, key := range []string{"course_code", "location", "campus", "weekday", "periods", "weeks"} {
 			rowProps[key] = str
@@ -93,17 +80,14 @@ func CampusCapability(id, account string, resources []string, view string, limit
 	} else if id == MailCapability {
 		rowProps["sender"], rowProps["sent_at"] = str, str
 		required = append(required, "sent_at")
-		coverage = "inbox_headers_only"
 	} else if id == ActivityCapability {
 		rowProps["location"] = str
 		rowProps["activity_time"] = map[string]any{"type": "array", "minItems": 2, "maxItems": 2, "items": str}
 		required = append(required, "activity_time")
-		coverage = "visible_activity_summaries_only"
 	} else {
 		amount := map[string]any{"type": "string", "maxLength": 64, "pattern": `^-?[0-9]+(\.[0-9]+)?$`}
 		rowProps["remaining_kwh"], rowProps["subsidy_kwh"] = amount, amount
 		required = append(required, "remaining_kwh", "subsidy_kwh")
-		coverage = "bound_room_balance_only"
 	}
 	object := func(p map[string]any, r []string) map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": p, "required": r}

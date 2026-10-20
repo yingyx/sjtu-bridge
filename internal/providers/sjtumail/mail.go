@@ -143,7 +143,8 @@ func soap(ctx context.Context, session *mailSession, operation, namespace string
 	return result, nil
 }
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
-	if q.ResourceRef != "mail:folder:inbox" || q.View != "headers_v1" || q.Limit < 1 || q.Limit > 50 || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
+	rules, _ := contracts.CampusRules(contracts.MailCapability)
+	if !rules.ValidQuery(q) || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Invalid bounded inbox header query")
 	}
 	offset := 0
