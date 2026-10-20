@@ -208,40 +208,7 @@ func (p *Provider) List(ctx context.Context, input contracts.ListInput) (contrac
 }
 
 func nextURL(headers []string, current *url.URL, limit int) (*url.URL, error) {
-	var next *url.URL
-	for _, header := range headers {
-		for _, link := range strings.Split(header, ",") {
-			parts := strings.Split(link, ";")
-			if len(parts) < 2 {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Malformed Canvas pagination")
-			}
-			_, params, err := mime.ParseMediaType("application/link;" + strings.Join(parts[1:], ";"))
-			if err != nil || params["rel"] == "" {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Malformed Canvas link relation")
-			}
-			isNext := false
-			for _, relation := range strings.Fields(params["rel"]) {
-				if relation == "next" {
-					isNext = true
-				}
-			}
-			if !isNext {
-				continue
-			}
-			target := strings.TrimSpace(parts[0])
-			if !strings.HasPrefix(target, "<") || !strings.HasSuffix(target, ">") || next != nil {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Malformed Canvas next link")
-			}
-			u, err := url.Parse(target[1 : len(target)-1])
-			if err != nil {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid Canvas next link")
-			}
-			u = current.ResolveReference(u)
-			if !Allowed(u) || u.Path != "/api/v1/courses" || u.Query().Get("per_page") != strconv.Itoa(limit) || u.Query().Get("page") == "" {
-				return nil, contracts.Fail("UPSTREAM_CHANGED", "Canvas next link exceeded query scope")
-			}
-			next = u
-		}
-	}
-	return next, nil
+	return scopedNext(headers, current, func(next *url.URL) bool {
+		return Allowed(next) && next.Path == "/api/v1/courses" && next.Query().Get("per_page") == strconv.Itoa(limit) && next.Query().Get("page") != ""
+	})
 }
