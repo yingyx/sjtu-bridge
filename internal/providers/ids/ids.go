@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/strictjson"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -142,57 +143,8 @@ func (p *Provider) List(ctx context.Context, id string, in contracts.ListInput) 
 }
 
 func decode(raw []byte, target any) error {
-	// Duplicate keys can conceal an error status or change record identity.
-	// Unknown additive fields are ignored by the fixed output projection.
-	check := json.NewDecoder(bytes.NewReader(raw))
-	if uniqueJSON(check, 0) != nil || check.Decode(new(any)) != io.EOF {
+	if strictjson.Decode(raw, target) != nil {
 		return changed()
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if err := d.Decode(target); err != nil {
-		return err
-	}
-	if d.Decode(new(any)) != io.EOF {
-		return changed()
-	}
-	return nil
-}
-
-func uniqueJSON(d *json.Decoder, depth int) error {
-	if depth > 32 {
-		return changed()
-	}
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); ok {
-		switch delimiter {
-		case '{':
-			seen := map[string]bool{}
-			for d.More() {
-				token, err := d.Token()
-				key, ok := token.(string)
-				if err != nil || !ok || seen[key] {
-					return changed()
-				}
-				seen[key] = true
-				if uniqueJSON(d, depth+1) != nil {
-					return changed()
-				}
-			}
-		case '[':
-			for d.More() {
-				if uniqueJSON(d, depth+1) != nil {
-					return changed()
-				}
-			}
-		default:
-			return changed()
-		}
-		if _, err := d.Token(); err != nil {
-			return err
-		}
 	}
 	return nil
 }

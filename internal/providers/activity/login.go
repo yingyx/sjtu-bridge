@@ -1,21 +1,19 @@
 package activity
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"mime"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/auth"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
+	"github.com/yingyx/sjtu-bridge/internal/strictjson"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -44,14 +42,10 @@ func decode(r transport.Reply) (envelope, error) {
 	}
 	media, params, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	charset := strings.ToLower(params["charset"])
-	d := json.NewDecoder(bytes.NewReader(r.Body))
-	d.UseNumber()
-	if e != nil || media != "application/json" || (charset != "" && charset != "utf-8" && charset != "utf8") || len(r.Body) > 2<<20 || !utf8.Valid(r.Body) || !uniqueJSON(d, 0) || json.Unmarshal(r.Body, &v) != nil || v.Code == nil || len(v.Data) == 0 {
+	if e != nil || media != "application/json" || (charset != "" && charset != "utf-8" && charset != "utf8") || len(r.Body) > 2<<20 || strictjson.Decode(r.Body, &v) != nil || v.Code == nil || len(v.Data) == 0 {
 		return v, contracts.Fail("UPSTREAM_CHANGED", "Expected activity JSON envelope")
 	}
-	if _, e := d.Token(); e != io.EOF {
-		return v, contracts.Fail("UPSTREAM_CHANGED", "Expected one activity JSON envelope")
-	}
+
 	switch *v.Code {
 	case 200:
 		return v, nil
@@ -64,45 +58,6 @@ func decode(r transport.Reply) (envelope, error) {
 	default:
 		return v, contracts.Fail("UPSTREAM_UNAVAILABLE", "Activity portal rejected the request")
 	}
-}
-
-// Reject duplicate keys at every depth before decoding identity or visibility.
-// Fold case because encoding/json matches struct fields case-insensitively.
-func uniqueJSON(d *json.Decoder, depth int) bool {
-	if depth > 32 {
-		return false
-	}
-	token, e := d.Token()
-	if e != nil {
-		return false
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return true
-	}
-	switch delim {
-	case '{':
-		seen := map[string]bool{}
-		for d.More() {
-			key, e := d.Token()
-			s, ok := key.(string)
-			s = strings.ToLower(s)
-			if e != nil || !ok || seen[s] || !uniqueJSON(d, depth+1) {
-				return false
-			}
-			seen[s] = true
-		}
-	case '[':
-		for d.More() {
-			if !uniqueJSON(d, depth+1) {
-				return false
-			}
-		}
-	default:
-		return false
-	}
-	end, e := d.Token()
-	return e == nil && ((delim == '{' && end == json.Delim('}')) || (delim == '[' && end == json.Delim(']')))
 }
 
 func get(ctx context.Context, c HTTP, raw string, h http.Header) (transport.Reply, error) {
