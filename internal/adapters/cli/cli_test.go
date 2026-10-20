@@ -26,6 +26,9 @@ func TestJSONStdinAndFailureChannels(t *testing.T) {
 		{[]string{"broker", "init"}, "yes\n", 1},
 		{[]string{"auth", "import", "--provider", "canvas"}, "SYNTHETIC_SECRET", 1},
 		{[]string{"auth", "import", "--provider", "jaccount"}, "SYNTHETIC_SECRET", 1},
+		{[]string{"auth", "login"}, "SYNTHETIC_SECRET", 1},
+		{[]string{"auth", "login", "--providers", "canvas"}, "SYNTHETIC_SECRET", 1},
+		{[]string{"auth", "login", "--providers", "teaching,teaching"}, "SYNTHETIC_SECRET", 1},
 		{[]string{"apps", "create", "synthetic", "--output", "C:\\synthetic\\connection.json"}, "yes\n", 1},
 		{[]string{"canvas", "assignments", "list", "--account", "canvas:user:7", "--course", "canvas:course:1", "--view", "deadlines_v1"}, "", 1},
 	} {

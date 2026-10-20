@@ -97,6 +97,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
+	authCmd.AddCommand(campusLoginCommand(out, diag, input))
 	checkProvider := ""
 	check := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if checkProvider != "jaccount" {
