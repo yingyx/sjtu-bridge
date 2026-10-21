@@ -54,20 +54,62 @@ func PersonalMetadata(id string) (Capability, bool) {
 	}
 	return Capability{}, false
 }
+
+// CampusInputSchema describes reviewed input shape without granting access.
+func CampusInputSchema(id string) json.RawMessage {
+	input, ok := campusInputDefinition(id)
+	if !ok {
+		return nil
+	}
+	raw, _ := json.Marshal(input)
+	return raw
+}
+
+func campusInputDefinition(id string) (map[string]any, bool) {
+	rules, ok := CampusRules(id)
+	if !ok {
+		return nil, false
+	}
+	resource := map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "description": "获准资源；JSON 字段 resource_ref；从 capabilities describe 获取"}
+	switch id {
+	case TimetableCapability:
+		resource["pattern"] = semesterRef.String()
+	case MailCapability:
+		resource["enum"] = []string{"mail:folder:inbox"}
+	case ActivityCapability:
+		resource["enum"] = []string{"activity:feed:visible"}
+	case ElectricityBalanceCapability:
+		resource["pattern"] = electricRoomRef.String()
+	}
+	props := map[string]any{
+		"account_ref":  map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "description": "获准门户账号；JSON 字段 account_ref；从 capabilities describe 获取"},
+		"resource_ref": resource,
+		"view":         map[string]any{"type": "string", "enum": []string{rules.View}, "description": "本能力的固定视图"},
+		"limit":        map[string]any{"type": "integer", "minimum": 1, "maximum": rules.MaxLimit, "description": "每页条数，须在应用授权上限内"},
+		"cursor":       map[string]any{"type": "string", "maxLength": 64, "description": "上一页的 next_cursor；保持其他参数相同"},
+	}
+	if rules.QueryAllowed {
+		props["query"] = map[string]any{"type": "string", "maxLength": 128, "description": "邮件标题关键词，空白分词且须全部命中；不支持查询语法或正文搜索"}
+	}
+	if !rules.Paginated {
+		props["cursor"] = map[string]any{"type": "string", "enum": []string{""}, "description": "此能力不分页，请省略"}
+	}
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": []string{"account_ref", "resource_ref", "view", "limit"}}, true
+}
+
 func CampusCapability(id, account string, resources []string, view string, limit int) (Capability, bool) {
 	c, ok := PersonalMetadata(id)
 	rules, known := CampusRules(id)
 	if !ok || !known || !utf8.ValidString(account) || account == "" || len(account) > 128 || !rules.ValidGrant(view, limit, resources) {
 		return Capability{}, false
 	}
-	props := map[string]any{"account_ref": map[string]any{"type": "string", "enum": []string{account}}, "resource_ref": map[string]any{"type": "string", "enum": resources}, "view": map[string]any{"type": "string", "enum": []string{view}}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": limit}, "cursor": map[string]any{"type": "string", "maxLength": 64}}
-	if rules.QueryAllowed {
-		props["query"] = map[string]any{"type": "string", "maxLength": 128, "description": "Literal subject keywords only, all terms must match; no IMAP/Zimbra query syntax or message body search"}
-	}
-	if !rules.Paginated {
-		props["cursor"] = map[string]any{"type": "string", "enum": []string{""}}
-	}
-	c.InputSchema, _ = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": []string{"account_ref", "resource_ref", "view", "limit"}})
+	input, _ := campusInputDefinition(id)
+	props := input["properties"].(map[string]any)
+	props["account_ref"].(map[string]any)["enum"] = []string{account}
+	props["resource_ref"].(map[string]any)["enum"] = resources
+	props["view"].(map[string]any)["enum"] = []string{view}
+	props["limit"].(map[string]any)["maximum"] = limit
+	c.InputSchema, _ = json.Marshal(input)
 	str := map[string]any{"type": "string", "maxLength": 2048}
 	rowProps := map[string]any{"resource_ref": map[string]any{"type": "string", "enum": resources}, "record_ref": str, "title": str}
 	required := []string{"resource_ref", "record_ref", "title"}
