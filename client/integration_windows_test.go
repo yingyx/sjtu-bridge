@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -85,12 +86,34 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 		t.Fatal(e)
 	}
 	var out, diag bytes.Buffer
-	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10"}, &out, &diag, strings.NewReader("")) != 0 {
+	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
 	var fromCLI contracts.AssignmentResponse
 	if json.Unmarshal(out.Bytes(), &fromCLI) != nil || !reflect.DeepEqual(expected.Data, fromCLI.Data) {
 		t.Fatal("CLI differs from SDK")
+	}
+	testConnectedCLIWorkflow(t, ctx, path, expected.Data)
+	inputJSON, _ := json.Marshal(q)
+	inputPath := filepath.Join(d, "synthetic-input.json")
+	if err := os.WriteFile(inputPath, inputJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{"--input-json-stdin"}, {"--input-file", inputPath}} {
+		out.Reset()
+		diag.Reset()
+		args := append([]string{"canvas", "assignments", "list", "--connection", path, "--json"}, flags...)
+		if cli.Execute(ctx, args, &out, &diag, bytes.NewReader(inputJSON)) != 0 || json.Unmarshal(out.Bytes(), &fromCLI) != nil || !reflect.DeepEqual(expected.Data, fromCLI.Data) {
+			t.Fatal("CLI JSON input differs from SDK", diag.String())
+		}
+	}
+	unauthorized := q
+	unauthorized.CourseRef = "canvas:course:2"
+	unauthorizedJSON, _ := json.Marshal(unauthorized)
+	out.Reset()
+	diag.Reset()
+	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--input-json-stdin", "--json"}, &out, &diag, bytes.NewReader(unauthorizedJSON)) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "PERMISSION_DENIED") {
+		t.Fatal("JSON input escaped the grant", diag.String())
 	}
 	server, e := adapter.NewRemote(ctx, c)
 	if e != nil {
@@ -132,8 +155,12 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if cli.Execute(ctx, []string{"capabilities", "list", "--connection", path, "--json"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
-	var cliCaps []contracts.Capability
-	if json.Unmarshal(out.Bytes(), &cliCaps) != nil || !reflect.DeepEqual(contracts.CapabilitySummaries(caps), cliCaps) {
+	var cliCaps []contracts.CapabilitySummary
+	expectedCLICaps := contracts.CapabilitySummaries(caps)
+	for i := range expectedCLICaps {
+		expectedCLICaps[i].CLICommand += " --connection CONNECTION_FILE"
+	}
+	if json.Unmarshal(out.Bytes(), &cliCaps) != nil || !reflect.DeepEqual(expectedCLICaps, cliCaps) {
 		t.Fatal("CLI discovery differs from SDK")
 	}
 	publicResult, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{"limit": 3}})
@@ -231,6 +258,108 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 			if cli.Execute(ctx, args, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "CLIENT_UNAUTHORIZED") {
 				t.Fatal("invalid CLI connection fell back to public", diag.String())
 			}
+		}
+	}
+}
+
+// Follow only the command names, flag mappings and examples returned by the
+// connected discovery surface, as an Agent would. The public query uses the
+// bundled directory, so neither workflow calls a campus network.
+func testConnectedCLIWorkflow(t *testing.T, ctx context.Context, path string, expected contracts.AssignmentData) {
+	t.Helper()
+	execute := func(args []string) (int, []byte, []byte) {
+		var out, diag bytes.Buffer
+		code := cli.Execute(ctx, args, &out, &diag, strings.NewReader(""))
+		return code, out.Bytes(), diag.Bytes()
+	}
+	var privateArgs []string
+	var privateFlags map[string]string
+	for _, task := range []struct{ query, id string }{{"作业", contracts.AssignmentsCapability}, {"校园网站", "public.services.list"}} {
+		code, textOut, textDiag := execute([]string{"capabilities", "search", task.query, "--connection", path})
+		if code != 0 || !bytes.Contains(textOut, []byte("sjtu capabilities describe 能力ID --connection CONNECTION_FILE")) || bytes.Contains(textOut, []byte(path)) || len(textDiag) != 0 {
+			t.Fatalf("connected search omitted the follow-up connection or disclosed its path: %s", textDiag)
+		}
+		code, out, diag := execute([]string{"capabilities", "search", task.query, "--connection", path, "--json"})
+		var found []contracts.CapabilitySummary
+		if code != 0 || json.Unmarshal(out, &found) != nil || len(found) == 0 || found[0].ID != task.id {
+			t.Fatalf("connected task search %s failed: %s / %s", task.id, out, diag)
+		}
+		code, out, diag = execute([]string{"capabilities", "describe", found[0].ID, "--connection", path, "--json"})
+		var guide struct {
+			ID          string            `json:"id"`
+			CLICommand  string            `json:"cli_command"`
+			CLIFlags    map[string]string `json:"cli_flags"`
+			InputSchema json.RawMessage   `json:"input_schema"`
+			Example     string            `json:"example"`
+		}
+		if code != 0 || json.Unmarshal(out, &guide) != nil || guide.ID != task.id || guide.CLICommand != found[0].CLICommand || !json.Valid(guide.InputSchema) {
+			t.Fatalf("connected describe %s failed: %s / %s", task.id, out, diag)
+		}
+		// Test examples contain only known synthetic IDs with no whitespace;
+		// tokenize first so a connection path containing spaces stays one value.
+		args := strings.Fields(guide.Example)
+		if len(args) < 2 || args[0] != "sjtu" || !strings.Contains(guide.Example, "--connection CONNECTION_FILE") {
+			t.Fatalf("connected example lost its connection: %s", guide.Example)
+		}
+		args = args[1:]
+		for i := range args {
+			args[i] = strings.Trim(args[i], "'")
+			if args[i] == "CONNECTION_FILE" {
+				args[i] = path
+			}
+		}
+		code, out, diag = execute(args)
+		if code != 0 || !json.Valid(out) || len(diag) != 0 {
+			t.Fatalf("discovered example did not invoke %s: %s / %s", task.id, out, diag)
+		}
+		if task.id == contracts.AssignmentsCapability {
+			privateArgs, privateFlags = args, guide.CLIFlags
+			if privateFlags["account_ref"] != "--account" || privateFlags["course_ref"] != "--course" || privateFlags["limit"] != "--limit" || privateFlags["cursor"] != "--cursor" {
+				t.Fatal("private guide has incorrect flag mappings", privateFlags)
+			}
+			var result contracts.AssignmentResponse
+			if json.Unmarshal(out, &result) != nil || !reflect.DeepEqual(result.Data, expected) || result.Meta.Provider != "canvas" || result.Meta.Coverage != "page" || result.Meta.FetchedAt.IsZero() || !result.Meta.HasMore || result.Meta.NextCursor == nil || result.RequestID == "" || bytes.Contains(out, []byte(`"title"`)) {
+				t.Fatal("connected first page lost its projection or pagination metadata")
+			}
+			nextArgs := append(append([]string{}, args...), privateFlags["cursor"], *result.Meta.NextCursor)
+			code, nextOut, nextDiag := execute(nextArgs)
+			var next contracts.AssignmentResponse
+			if code != 0 || json.Unmarshal(nextOut, &next) != nil || len(next.Data.Items) != 1 || next.Data.Items[0].AssignmentRef == result.Data.Items[0].AssignmentRef || next.Meta.Coverage != "complete" || next.Meta.HasMore || next.Meta.NextCursor != nil || len(nextDiag) != 0 {
+				t.Fatal("discovered private continuation failed or lost final-page state", string(nextDiag))
+			}
+		} else {
+			var result contracts.Response
+			if json.Unmarshal(out, &result) != nil || len(result.Data.Items) == 0 || len(result.Meta.Sources) == 0 || result.Meta.FetchedAt.IsZero() || len(result.Warnings) == 0 || result.RequestID == "" {
+				t.Fatal("connected public example lost its scope or source metadata")
+			}
+		}
+	}
+	for _, failure := range []struct{ field, value, code string }{{"limit", "101", "INVALID_ARGUMENT"}, {"course_ref", "canvas:course:2", "PERMISSION_DENIED"}} {
+		args := append([]string{}, privateArgs...)
+		changed := false
+		for i := range args {
+			if args[i] == privateFlags[failure.field] && i+1 < len(args) {
+				args[i+1], changed = failure.value, true
+				break
+			}
+		}
+		if !changed {
+			t.Fatal("discovered example omitted required input", failure.field)
+		}
+		code, out, diag := execute(args)
+		var rejected struct {
+			Error struct {
+				Code string `json:"code"`
+				Hint string `json:"hint"`
+			} `json:"error"`
+		}
+		if code == 0 || len(out) != 0 || json.Unmarshal(diag, &rejected) != nil || rejected.Error.Code != failure.code || rejected.Error.Hint == "" {
+			t.Fatalf("private rejection lost code or recovery hint: %s / %s", out, diag)
+		}
+		code, out, diag = execute(privateArgs)
+		var recovered contracts.AssignmentResponse
+		if code != 0 || json.Unmarshal(out, &recovered) != nil || !reflect.DeepEqual(recovered.Data, expected) || len(diag) != 0 {
+			t.Fatalf("correcting %s did not recover the private query: %s", failure.field, diag)
 		}
 	}
 }

@@ -19,25 +19,25 @@ func ValidDiningCanteen(id string) bool {
 // A schema describes accepted input; execution still requires policy admission.
 func PublicInputSchema(id string) json.RawMessage {
 	props := map[string]any{
-		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum items per call, default 10"},
-		"cursor": map[string]any{"type": "string", "maxLength": 4096, "description": "Opaque continuation from the same capability, filters and limit"},
+		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "每页最多返回的条数"},
+		"cursor": map[string]any{"type": "string", "maxLength": 4096, "description": "上次结果的 next_cursor；续页须保持相同命令、筛选条件和 limit"},
 	}
 	required := []string{}
 	switch id {
 	case "public.notices.search":
-		props["query"] = map[string]any{"type": "string", "maxLength": 128, "description": "Keywords matched against recent RSS titles and summaries only"}
+		props["query"] = map[string]any{"type": "string", "maxLength": 128, "description": "在近期 RSS 标题与摘要中匹配关键词"}
 	case "life.dining.areas", "life.dining.series":
-		props["canteen_id"] = map[string]any{"type": "string", "enum": diningCanteens, "description": "Reviewed parent canteen ID returned by life.dining.list"}
+		props["canteen_id"] = map[string]any{"type": "string", "enum": diningCanteens, "description": "食堂 ID；来源：sjtu life dining list"}
 		required = append(required, "canteen_id")
 		if id == "life.dining.series" {
-			props["day"] = map[string]any{"type": "string", "enum": []string{"today", "yesterday", "both"}, "description": "Raw source series, default both; preserves dates and all samples within the returned window, not a full-day claim"}
+			props["day"] = map[string]any{"type": "string", "enum": []string{"today", "yesterday", "both"}, "description": "today 今日，yesterday 昨日，both 两日（默认）；返回源站当次时段内的逐点采样"}
 		}
 	case "life.health.get", "development.notices.get", "administration.fees.get":
 		pattern, maxLength := "^[1-9][0-9]{0,9}$", 10
 		if id == "life.health.get" {
 			pattern, maxLength = "^[1-9][0-9]{0,19}$", 20
 		}
-		props = map[string]any{"item_id": map[string]any{"type": "string", "pattern": pattern, "maxLength": maxLength, "description": "Official numeric article ID returned by the matching list; never a URL"}}
+		props = map[string]any{"item_id": map[string]any{"type": "string", "pattern": pattern, "maxLength": maxLength, "description": "对应 list 命令返回的文章 ID"}}
 		required = []string{"item_id"}
 	}
 	raw, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required})

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,23 +31,24 @@ func confirm(input io.Reader, diag io.Writer, preview any) error {
 	}
 	return nil
 }
-func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, connection *string) {
+func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, connection *string, jsonOutput, verbose *bool) {
+	write := func(value any) error { return writeResult(out, diag, value, *jsonOutput, *verbose) }
 	bc := &cobra.Command{Use: "broker", GroupID: "management", Short: "初始化并前台运行本机凭据服务"}
-	bc.AddCommand(&cobra.Command{Use: "init", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	bc.AddCommand(&cobra.Command{Use: "init", Short: "初始化本机凭据存储与管理身份", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if e := confirm(input, diag, "初始化系统 keyring 主密钥、独立 owner 凭证与私有状态；已有状态不可重置"); e != nil {
 			return e
 		}
 		if e := broker.Initialize(); e != nil {
 			return e
 		}
-		return writeJSON(out, map[string]string{"status": "initialized"})
+		return write(map[string]string{"status": "initialized"})
 	}})
-	bc.AddCommand(&cobra.Command{Use: "run", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return broker.Run(cmd.Context()) }})
+	bc.AddCommand(&cobra.Command{Use: "run", Short: "在前台运行单实例 Broker", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return broker.Run(cmd.Context()) }})
 	root.AddCommand(bc)
 	authCmd := &cobra.Command{Use: "auth", GroupID: "management", Short: "用户凭据导入、移除与会话诊断"}
 	provider, label := "", "main"
 	var browserContext bool
-	importCmd := &cobra.Command{Use: "import", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	importCmd := &cobra.Command{Use: "import", Short: "隐藏输入并核验 Token 或 Cookie 后导入", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if provider == "jaccount" {
 			return contracts.Fail("NOT_READY", "JAAuthCookie stable identity is not ready for persistent import")
 		}
@@ -91,15 +91,15 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		if e = broker.OwnerCall(cmd.Context(), q, &v); e != nil {
 			return e
 		}
-		return writeJSON(out, v)
+		return write(v)
 	}}
 	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), teaching / sjtumail / activity / electric (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
-	authCmd.AddCommand(campusLoginCommand(out, diag, input))
+	authCmd.AddCommand(campusLoginCommand(out, diag, input, jsonOutput, verbose))
 	checkProvider := ""
-	check := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	check := &cobra.Command{Use: "check", Short: "临时检查 jAccount 会话状态", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if checkProvider != "jaccount" {
 			return contracts.Fail("INVALID_ARGUMENT", "Use --provider jaccount")
 		}
@@ -112,12 +112,13 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		if e != nil {
 			return e
 		}
-		return writeJSON(out, v)
+		return write(v)
 	}}
 	check.Flags().StringVar(&checkProvider, "provider", "", "Diagnostic provider (jaccount)")
 	authCmd.AddCommand(check)
 	ownerCommand := func(use, action string, q *broker.AdminRequest, mutating bool) *cobra.Command {
-		return &cobra.Command{Use: use, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		descriptions := map[string]string{"status": "查看已保存凭据、应用与授权状态", "credential_remove": "移除凭据并撤销关联应用授权", "courses": "列出已验证 Canvas 账号的课程", "resources": "查询本人宿舍电费账号的绑定房间", "app_revoke": "撤销应用连接及其授权", "grant": "授予应用指定账号、资源和视图的访问权", "grant_revoke": "撤销应用当前的个人能力授权"}
+		return &cobra.Command{Use: use, Short: descriptions[action], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if e := auth.RequireTerminal(input); e != nil {
 				return e
 			}
@@ -131,7 +132,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			if e := broker.OwnerCall(cmd.Context(), *q, &v); e != nil {
 				return e
 			}
-			return writeJSON(out, v)
+			return write(v)
 		}}
 	}
 	statusQ := &broker.AdminRequest{}
@@ -148,7 +149,6 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	authCmd.AddCommand(courses)
 	resourcesQ := &broker.AdminRequest{}
 	resources := ownerCommand("resources", "resources", resourcesQ, false)
-	resources.Short = "查询本人宿舍电费账号的已绑定房间资源；不授予应用访问权"
 	resources.Flags().StringVar(&resourcesQ.CredentialID, "credential", "", "Independently verified electricity credential ID")
 	_ = resources.MarkFlagRequired("credential")
 	authCmd.AddCommand(resources)
@@ -156,7 +156,11 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	apps := &cobra.Command{Use: "apps", GroupID: "management", Short: "创建、轮换和撤销应用连接"}
 	for _, action := range []string{"create", "rotate"} {
 		q := &broker.AdminRequest{}
-		c := &cobra.Command{Use: action + " NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		description := "创建应用并交付连接文件"
+		if action == "rotate" {
+			description = "轮换应用令牌并交付新的连接文件"
+		}
+		c := &cobra.Command{Use: action + " NAME", Short: description, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			q.Action = "app_" + action
 			q.ClientID = args[0]
 			if e := auth.RequireTerminal(input); e != nil {
@@ -186,7 +190,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			if e = broker.OwnerCall(cmd.Context(), *q, &v); e != nil {
 				return e
 			}
-			return writeJSON(out, v)
+			return write(v)
 		}}
 		c.Flags().StringVar(&q.Path, "output", "", "Absolute new connection file in a private directory, outside workspace")
 		_ = c.MarkFlagRequired("output")
@@ -221,33 +225,46 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	_ = revokeGrant.MarkFlagRequired("app")
 	permissions.AddCommand(revokeGrant)
 	root.AddCommand(permissions)
-	canvas := &cobra.Command{Use: "canvas", GroupID: "services", Short: "Canvas 学习任务与作业查询", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return contracts.Fail("UNSUPPORTED", "Use canvas assignments list through a Broker connection")
-	}}
-	assignments := &cobra.Command{Use: "assignments"}
+	canvas := &cobra.Command{Use: "canvas", GroupID: "services", Short: "Canvas 学习任务与作业查询"}
+	assignments := &cobra.Command{Use: "assignments", Short: "课程作业与截止时间"}
 	var q contracts.AssignmentQuery
+	var assignmentInput *jsonInputOptions
+	assignmentSchema := contracts.AssignmentInputSchema()
+	assignmentFlags := []string{"account", "course", "view", "limit", "cursor"}
 	list := &cobra.Command{Use: "list", Short: "查询获准课程的作业与截止时间", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if e := requirePrivateConnection(*connection); e != nil {
+			return e
+		}
+		raw, e := assignmentInput.read(cmd, input, q, assignmentFlags, assignmentSchema)
+		if e != nil {
+			return e
+		}
 		c, e := client.Open(*connection)
 		if e != nil {
 			return e
 		}
 		defer c.Close()
-		v, e := c.Assignments(cmd.Context(), q)
+		v, e := c.Invoke(cmd.Context(), contracts.Invocation{Capability: contracts.AssignmentsCapability, Input: raw})
 		if e != nil {
 			return e
 		}
-		return writeJSON(out, v)
+		return write(v)
 	}}
-	list.Flags().StringVar(&q.AccountRef, "account", "", "Granted stable account_ref")
-	list.Flags().StringVar(&q.CourseRef, "course", "", "Granted course_ref")
-	list.Flags().StringVar(&q.View, "view", "", "Granted fixed view")
-	list.Flags().IntVar(&q.Limit, "limit", 20, "Maximum items for one page")
-	list.Flags().StringVar(&q.Cursor, "cursor", "", "Opaque Broker continuation (5-minute lifetime)")
+	list.Example = "  sjtu capabilities describe canvas.assignments.list --connection CONNECTION\n  sjtu canvas assignments list --connection CONNECTION --account ACCOUNT --course COURSE --view deadlines_v1 --limit 20"
+	list.Flags().StringVar(&q.AccountRef, "account", "", "")
+	list.Flags().StringVar(&q.CourseRef, "course", "", "")
+	list.Flags().StringVar(&q.View, "view", "", "")
+	list.Flags().IntVar(&q.Limit, "limit", 20, "")
+	list.Flags().StringVar(&q.Cursor, "cursor", "", "")
+	applySchemaFlagHelp(list, assignmentSchema)
+	assignmentInput = addJSONInputFlags(list)
 	assignments.AddCommand(list)
 	canvas.AddCommand(assignments)
 	root.AddCommand(canvas)
 	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability, contracts.ElectricityBalanceCapability} {
 		metadata, _ := contracts.PersonalMetadata(id)
+		rules, _ := contracts.CampusRules(id)
+		schema := contracts.CampusInputSchema(id)
 		parts := strings.Split(id, ".")
 		group := findCommand(root, parts[0])
 		if group == nil {
@@ -256,37 +273,52 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		resource := findCommand(group, parts[1])
 		if resource == nil {
-			resource = &cobra.Command{Use: parts[1]}
+			resource = &cobra.Command{Use: parts[1], Short: metadata.Title}
 			group.AddCommand(resource)
 		}
 		var q contracts.CampusQuery
+		var jsonInput *jsonInputOptions
+		businessFlags := []string{"account", "resource", "view", "limit", "cursor"}
 		list := &cobra.Command{Use: parts[2], Short: metadata.Title, Long: metadata.Description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			if e := requirePrivateConnection(*connection); e != nil {
+				return e
+			}
+			raw, e := jsonInput.read(cmd, input, q, businessFlags, schema)
+			if e != nil {
+				return e
+			}
 			c, e := client.Open(*connection)
 			if e != nil {
 				return e
 			}
 			defer c.Close()
-			raw, _ := json.Marshal(q)
 			v, e := c.Invoke(cmd.Context(), contracts.Invocation{Capability: id, Input: raw})
 			if e != nil {
 				return e
 			}
-			return writeJSON(out, v)
+			return write(v)
 		}}
-		list.Flags().StringVar(&q.AccountRef, "account", "", "Granted stable portal account_ref")
-		list.Flags().StringVar(&q.ResourceRef, "resource", "", "Granted portal resource_ref")
-		list.Flags().StringVar(&q.View, "view", "", "Granted schedule_v1, headers_v1, summaries_v1 or balance_v1 view")
-		defaultLimit := 20
-		if id == contracts.ElectricityBalanceCapability {
-			defaultLimit = 1
+		list.Example = "  sjtu capabilities describe " + id + " --connection CONNECTION\n  sjtu " + strings.ReplaceAll(id, ".", " ") + " --connection CONNECTION --account ACCOUNT --resource RESOURCE --view " + rules.View + " --limit " + fmt.Sprint(min(20, rules.MaxLimit))
+		list.Flags().StringVar(&q.AccountRef, "account", "", "")
+		list.Flags().StringVar(&q.ResourceRef, "resource", "", "")
+		list.Flags().StringVar(&q.View, "view", "", "")
+		list.Flags().IntVar(&q.Limit, "limit", min(20, rules.MaxLimit), "")
+		list.Flags().StringVar(&q.Cursor, "cursor", "", "")
+		if rules.QueryAllowed {
+			list.Flags().StringVar(&q.Query, "query", "", "")
+			businessFlags = append(businessFlags, "query")
 		}
-		list.Flags().IntVar(&q.Limit, "limit", defaultLimit, "Maximum items for one page (mail <=50; activities <=20; electricity=1)")
-		list.Flags().StringVar(&q.Cursor, "cursor", "", "Opaque Broker continuation")
-		if id == contracts.MailCapability {
-			list.Flags().StringVar(&q.Query, "query", "", "Literal subject keywords; no message body search")
-		}
+		applySchemaFlagHelp(list, schema)
+		jsonInput = addJSONInputFlags(list)
 		resource.AddCommand(list)
 	}
+}
+
+func requirePrivateConnection(connection string) error {
+	if strings.TrimSpace(connection) != "" {
+		return nil
+	}
+	return &cliError{Code: "CLIENT_UNAUTHORIZED", Message: "个人查询缺少 --connection 应用连接文件", Hint: "使用 --connection 连接文件绝对路径；先运行 sjtu capabilities describe 能力ID --connection 连接文件查看获准参数"}
 }
 
 func findCommand(parent *cobra.Command, name string) *cobra.Command {

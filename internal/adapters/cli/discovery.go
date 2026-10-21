@@ -29,8 +29,8 @@ func discover(ctx context.Context, profile, connection string) ([]contracts.Capa
 	return api.Capabilities(), nil
 }
 
-func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *string, jsonOutput *bool) {
-	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "按任务查找当前可调用的校园能力", Long: "未连接时发现公共能力；已连接时发现公共能力与本应用获授权的个人能力。\nlist/search 返回摘要，describe 返回完整契约。发现结果不代替调用时的权限检查。"}
+func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *string, jsonOutput, verbose *bool) {
+	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "按任务查找当前可调用的校园能力", Long: "先用 search 查找任务，再用 describe 查看参数和调用示例。\n使用 --connection 加入应用获准的个人能力；--verbose 查看完整契约。"}
 	for _, verb := range []string{"list", "search"} {
 		filter := contracts.CapabilityFilter{}
 		use, short, args := "list", "列出能力摘要，可按分类和服务筛选", cobra.NoArgs
@@ -53,38 +53,50 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 				return err
 			}
 			if *jsonOutput {
-				return writeJSON(out, contracts.CapabilitySummaries(caps))
+				if *verbose {
+					return writePrettyJSON(out, caps)
+				}
+				return writeJSON(out, discoverySummaries(caps, *connection != ""))
 			}
+			var text strings.Builder
 			if len(caps) == 0 {
-				fmt.Fprintln(out, "当前可用能力中没有匹配项。")
-				return nil
+				fmt.Fprintln(&text, "当前可用能力中没有匹配项。可缩短关键词，或使用 sjtu capabilities list"+discoveryConnectionSuffix(*connection != "")+" 查看目录。")
+			} else {
+				for i, summary := range discoverySummaries(caps, *connection != "") {
+					fmt.Fprintf(&text, "%s  %s · %s\n  %s\n  %s\n", summary.ID, summary.Title, deliveryLabel(summary.Delivery), summary.CLICommand, summary.Description)
+					if *verbose {
+						c := caps[i]
+						fmt.Fprintf(&text, "  ID：%s；%s / %s / %s\n  %s; data=%s; effects=%v; reversibility=%s; execution=%s\n  %s\n", c.ID, c.CategoryLabel, c.TaskGroupLabel, c.Service, c.Operation, c.DataClass, c.Effects, c.Reversibility, c.ExecutionRule, c.Description)
+					}
+				}
+				fmt.Fprintln(&text, "参数与示例：sjtu capabilities describe 能力ID"+discoveryConnectionSuffix(*connection != "")+"；完整契约：追加 --verbose。")
 			}
-			for _, c := range caps {
-				fmt.Fprintf(out, "%s\t%s\n  %s (%s) / %s / %s\n  %s; %s; data=%s; effects=%v; reversibility=%s; execution=%s\n  %s\n", c.ID, c.Title, c.CategoryLabel, c.Category, c.TaskGroupLabel, c.Service, c.Operation, c.Delivery, c.DataClass, c.Effects, c.Reversibility, c.ExecutionRule, c.Description)
-			}
-			fmt.Fprintln(out, "使用 sjtu capabilities describe ID 查看完整参数和返回字段。")
-			return nil
+			_, err = io.WriteString(out, text.String())
+			return err
 		}}
 		command.Flags().StringVar(&filter.Category, "category", "", "业务分类 ID 或中文名称，如 learning / 学习与教学")
 		command.Flags().StringVar(&filter.TaskGroup, "task-group", "", "任务组 ID 或中文名称，如 practice / 实践修业与达标；包含显式交叉入口")
 		command.Flags().StringVar(&filter.Service, "service", "", "服务名称，如 Canvas / 教务处")
 		if verb == "search" {
 			command.Example = "  sjtu capabilities search 校历\n  sjtu capabilities search \"作业 截止时间\" --connection ABSOLUTE_PATH --json"
-			command.Long = "在当前可用能力的标题、分类、服务、中文别名和关键词中检索。\n大小写不敏感，空白分隔的所有词都须匹配；不搜索业务数据或限制说明。"
+			command.Long = "按任务名称、别名和关键词检索当前可用能力，最相关的结果在前。\n大小写不敏感，空白分隔的所有词都须匹配；分类匹配排在任务和关键词之后。"
 		}
 		group.AddCommand(command)
 	}
-	group.AddCommand(&cobra.Command{Use: "describe ID", Short: "查看完整契约、获准参数范围和调用入口", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	group.AddCommand(&cobra.Command{Use: "describe ID", Short: "查看调用参数和示例；--verbose 查看完整契约", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		caps, err := discover(cmd.Context(), *profile, *connection)
 		if err != nil {
 			return err
 		}
 		for _, c := range caps {
 			if c.Authorized && c.ID == args[0] {
-				return writeJSON(out, c)
+				if *verbose {
+					return writePrettyJSON(out, c)
+				}
+				return writeCapabilityUsage(out, root, c, *jsonOutput)
 			}
 		}
-		return contracts.Fail("PERMISSION_DENIED", "Capability is not available in this application context")
+		return unavailableCapability(args[0], caps)
 	}})
 	root.AddCommand(group)
 }

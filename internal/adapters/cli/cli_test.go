@@ -33,7 +33,8 @@ func TestJSONStdinAndFailureChannels(t *testing.T) {
 		{[]string{"canvas", "assignments", "list", "--account", "canvas:user:7", "--course", "canvas:course:1", "--view", "deadlines_v1"}, "", 1},
 	} {
 		var out, diagnostics bytes.Buffer
-		exit := Execute(context.Background(), test.args, &out, &diagnostics, strings.NewReader(test.input))
+		args := append(append([]string{}, test.args...), "--json")
+		exit := Execute(context.Background(), args, &out, &diagnostics, strings.NewReader(test.input))
 		if exit != test.want {
 			t.Fatal(test, exit, out.String(), diagnostics.String())
 		}

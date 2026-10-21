@@ -62,7 +62,7 @@ func reuseLoginTargets(raw []byte, source string, providers []string, explicit b
 	return providers, nil
 }
 
-func campusLoginCommand(out, diag io.Writer, input io.Reader) *cobra.Command {
+func campusLoginCommand(out, diag io.Writer, input io.Reader, jsonOutput, verbose *bool) *cobra.Command {
 	providers := []string{"teaching", "sjtumail"}
 	label := "main"
 	sourceCredential := ""
@@ -129,7 +129,7 @@ func campusLoginCommand(out, diag io.Writer, input io.Reader) *cobra.Command {
 			verified = append(verified, map[string]string{"provider": p, "account_ref": v["account_ref"], "label": label})
 		}
 		if len(verified) == 0 {
-			if e := writeJSON(out, results); e != nil {
+			if e := writeResult(out, diag, results, *jsonOutput, *verbose); e != nil {
 				return e
 			}
 			return contracts.Fail("AUTH_REQUIRED", "Campus session did not verify any selected portal; no credential was imported")
@@ -156,7 +156,7 @@ func campusLoginCommand(out, diag io.Writer, input io.Reader) *cobra.Command {
 			results[i].Status = "imported"
 			results[i].CredentialID = v.ID
 		}
-		if e := writeJSON(out, results); e != nil {
+		if e := writeResult(out, diag, results, *jsonOutput, *verbose); e != nil {
 			return e
 		}
 		if failed {

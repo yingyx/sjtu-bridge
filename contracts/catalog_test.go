@@ -2,10 +2,38 @@ package contracts
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDiscoveryRejectsUnknownTaxonomyButAllowsEmptyMatches(t *testing.T) {
+	for _, tc := range []struct {
+		filter CapabilityFilter
+		field  string
+		known  string
+	}{
+		{CapabilityFilter{Category: "learnng"}, "--category", "learning"},
+		{CapabilityFilter{TaskGroup: "SYNTHETIC_PRIVATE_VALUE"}, "--task-group", "activities"},
+	} {
+		_, err := FilterCapabilities(nil, tc.filter)
+		var typed *Error
+		if !errors.As(err, &typed) || typed.Code != "INVALID_ARGUMENT" || !strings.Contains(typed.Message, tc.field) || !strings.Contains(typed.Message, tc.known) || strings.Contains(typed.Message, "SYNTHETIC_PRIVATE_VALUE") {
+			t.Fatalf("unknown taxonomy is not actionable: %v", err)
+		}
+	}
+	for _, filter := range []CapabilityFilter{
+		{Category: " LEARNING ", TaskGroup: "COURSES"},
+		{Category: "学习与教学", TaskGroup: "日常课程学习"},
+		{Category: "research", TaskGroup: "activities"},
+	} {
+		got, err := FilterCapabilities(nil, filter)
+		if err != nil || got == nil || len(got) != 0 {
+			t.Fatalf("valid taxonomy should allow empty matches: %+v %v %v", filter, got, err)
+		}
+	}
+}
 
 func TestTaskSearchUsesOnlyAuthorizedPositiveMetadata(t *testing.T) {
 	public := PublicCapabilities()
@@ -71,9 +99,13 @@ func TestCatalogSummaryAndDetailIsolation(t *testing.T) {
 	if summaries[0].CLICommand != "sjtu canvas assignments list" || summaries[0].MCPTool != "canvas_assignments_list" {
 		t.Fatal("missing invocation mapping")
 	}
-	summaries[0].Aliases[0] = "changed"
-	if c.Aliases[0] == "changed" {
-		t.Fatal("metadata aliases mutable through summary")
+	for _, absent := range []string{"aliases", "keywords", "authorized", "credentials", "effects", "execution_rule", "provider", "contract_version"} {
+		if strings.Contains(string(raw), `"`+absent+`"`) {
+			t.Fatalf("summary contains detailed metadata %q: %s", absent, raw)
+		}
+	}
+	if summaries[0].Description != "查询已授权 Canvas 课程的作业及个性化截止时间，仅返回获准的固定字段视图。" {
+		t.Fatal("summary is not one task sentence", summaries[0].Description)
 	}
 	first := PublicCapabilities()
 	first[0].Aliases[0] = "changed"
@@ -85,6 +117,49 @@ func TestCatalogSummaryAndDetailIsolation(t *testing.T) {
 	copy.Credentials[0] = "changed"
 	if cross.Credentials[0] != "CanvasToken" {
 		t.Fatal("credential requirement metadata mutable")
+	}
+}
+
+func TestSearchRanksTasksAheadOfClassification(t *testing.T) {
+	caps := PublicCapabilities()
+	for i := range caps {
+		caps[i].Authorized = true
+	}
+	for _, query := range []string{"校历", "public.calendars.list", "查询校历索引"} {
+		got, err := FilterCapabilities(caps, CapabilityFilter{Query: query})
+		if err != nil || len(got) == 0 || got[0].ID != "public.calendars.list" {
+			t.Fatalf("query %q: %v %v", query, got, err)
+		}
+	}
+	// Keywords outrank broad classifications even if ID ordering disagrees.
+	custom := []Capability{
+		{ID: "a.classification", Authorized: true, CategoryLabel: "needle"},
+		{ID: "b.keyword", Authorized: true, Keywords: []string{"needle"}},
+		{ID: "c.title", Authorized: true, Title: "find needle"},
+		{ID: "d.alias", Authorized: true, Aliases: []string{"needle"}},
+		{ID: "private.needle", Authorized: false, Title: "needle"},
+	}
+	got, err := FilterCapabilities(custom, CapabilityFilter{Query: "needle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	if !reflect.DeepEqual(ids, []string{"d.alias", "c.title", "b.keyword", "a.classification"}) {
+		t.Fatal(ids)
+	}
+	listed, err := FilterCapabilities(custom, CapabilityFilter{})
+	if err != nil || len(listed) != 4 || listed[0].ID != "a.classification" || listed[3].ID != "d.alias" {
+		t.Fatal("list ordering changed", listed, err)
+	}
+	for i, j := 0, len(custom)-1; i < j; i, j = i+1, j-1 {
+		custom[i], custom[j] = custom[j], custom[i]
+	}
+	again, err := FilterCapabilities(custom, CapabilityFilter{Query: "needle"})
+	if err != nil || !reflect.DeepEqual(got, again) {
+		t.Fatal("search depends on registration order", again, err)
 	}
 }
 

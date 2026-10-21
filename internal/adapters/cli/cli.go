@@ -3,10 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,7 +15,6 @@ import (
 
 func writeJSON(w io.Writer, value any) error {
 	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
 }
 
@@ -26,6 +22,7 @@ func writeJSON(w io.Writer, value any) error {
 func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	profile := "public"
 	jsonOutput := false
+	verbose := false
 	connection := ""
 	root := &cobra.Command{Use: "sjtu", Short: "SJTU Bridge：按应用授权的校园服务接入层", Long: "SJTU Bridge：按应用授权的校园服务接入层。\n\n先用 capabilities list/search 发现任务，再用 describe 查看参数与限制。\n应用使用 --connection 指定自己的连接文件；凭据导入和授权由用户管理命令完成。", SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(out)
@@ -47,6 +44,8 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	root.SetCompletionCommandGroupID("runtime")
 	root.PersistentFlags().StringVar(&profile, "profile", "public", "公共查询策略（仅 public）")
 	root.PersistentFlags().BoolVar(&jsonOutput, "json", false, "输出结构化 JSON")
+	root.PersistentFlags().BoolVar(&verbose, "verbose", false, "展开完整契约和来源说明；JSON 使用缩进排版")
+	_ = root.PersistentFlags().MarkHidden("profile")
 	root.PersistentFlags().StringVar(&connection, "connection", "", "应用连接文件绝对路径；显式连接的发现和业务调用都经 Broker")
 	withEngine := func(run func(*cobra.Command, *bridge.Engine) error) func(*cobra.Command, []string) error {
 		return func(cmd *cobra.Command, _ []string) error {
@@ -58,9 +57,9 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 			return run(cmd, api)
 		}
 	}
-	addDiscovery(root, out, &profile, &connection, &jsonOutput)
+	addDiscovery(root, out, &profile, &connection, &jsonOutput, &verbose)
 	root.AddCommand(&cobra.Command{Use: "doctor", GroupID: "runtime", Short: "离线实现状态与诊断（不探测校园网站）", Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
-		return writeJSON(out, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_read_only", "jaccount": "portal_specific_identity_required", "teaching": "broker_timetable_read_only", "sjtumail": "broker_inbox_headers_read_only", "activity": "broker_visible_summaries_read_only", "electric": "broker_bound_room_balance_read_only", "ids": "anonymous_buildings_and_semester", "campusfeed": "anonymous_rss_and_dining_queries"}, "capabilities": len(api.Capabilities())})
+		return writeResult(out, diagnostics, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_read_only", "jaccount": "portal_specific_identity_required", "teaching": "broker_timetable_read_only", "sjtumail": "broker_inbox_headers_read_only", "activity": "broker_visible_summaries_read_only", "electric": "broker_bound_room_balance_read_only", "ids": "anonymous_buildings_and_semester", "campusfeed": "anonymous_rss_and_dining_queries"}, "capabilities": len(api.Capabilities())}, jsonOutput, verbose)
 	})})
 	registry, err := bridge.New(bridge.Options{})
 	if err != nil {
@@ -83,46 +82,13 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 			resources[parts[0]+"."+parts[1]] = resource
 			group.AddCommand(resource)
 		}
-		var limit int
-		var cursor, inputFile, query, canteenID, day, itemID string
-		var stdinJSON bool
+		var jsonInput *jsonInputOptions
+		var publicInput *contracts.ListInput
+		var businessFlags []string
 		command := &cobra.Command{Use: parts[2], Short: c.Title, Long: c.Description, Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
-			var raw []byte
-			var err error
-			if inputFile != "" || stdinJSON {
-				if cmd.Flags().Changed("limit") || cmd.Flags().Changed("cursor") || cmd.Flags().Changed("query") || cmd.Flags().Changed("canteen-id") || cmd.Flags().Changed("day") || cmd.Flags().Changed("item-id") || (inputFile != "" && stdinJSON) {
-					return contracts.Fail("INVALID_ARGUMENT", "Use flags or one JSON input source")
-				}
-				reader := input
-				if inputFile != "" {
-					file, e := os.Open(inputFile)
-					if e != nil {
-						return contracts.Fail("INVALID_ARGUMENT", "Cannot read input file")
-					}
-					defer file.Close()
-					reader = file
-				}
-				raw, err = io.ReadAll(io.LimitReader(reader, contracts.MaxJSONBytes+1))
-				if err != nil {
-					return contracts.Fail("INVALID_ARGUMENT", "Cannot read JSON input")
-				}
-				if len(raw) > contracts.MaxJSONBytes {
-					return contracts.Fail("RESPONSE_TOO_LARGE", "Input file or stream exceeds 256 KiB")
-				}
-				// PowerShell UTF-8 files can have a BOM; JSON itself remains strictly UTF-8.
-				raw = []byte(strings.TrimPrefix(string(raw), "\ufeff"))
-				if len(raw) == 0 {
-					return contracts.Fail("INVALID_ARGUMENT", "JSON input is empty")
-				}
-			} else {
-				value := contracts.ListInput{Limit: limit, Cursor: cursor, Query: query, CanteenID: canteenID, Day: day, ItemID: itemID}
-				if strings.HasSuffix(c.ID, ".get") {
-					value.Limit = 0
-				}
-				raw, err = json.Marshal(value)
-				if err != nil {
-					return err
-				}
+			raw, err := jsonInput.read(cmd, input, publicInput, businessFlags, c.InputSchema)
+			if err != nil {
+				return err
 			}
 			var response contracts.Response
 			invocation := contracts.Invocation{Capability: c.ID, Input: raw}
@@ -143,66 +109,11 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOutput {
-				return writeJSON(out, response)
-			}
-			for _, item := range response.Data.Items {
-				date := ""
-				if item.PublishedDate != nil {
-					date = *item.PublishedDate
-				}
-				fmt.Fprintf(out, "%s\t%s\n  %s\n", date, item.Title, item.URL)
-				for _, field := range item.Fields {
-					fmt.Fprintf(out, "  %s：%s\n", field.Label, field.Value)
-				}
-				if content := item.Content; content != nil {
-					fmt.Fprintln(out, content.Text)
-					for _, link := range content.Links {
-						fmt.Fprintf(out, "  %s (%s)：%s\n", link.Title, link.Kind, link.URL)
-					}
-					if content.Truncated {
-						fmt.Fprintln(out, "  正文已截断，请核对官方来源。")
-					}
-				}
-				if n := item.Navigation; n != nil {
-					fmt.Fprintf(out, "  用途：%s\n  主归属：%s/%s\n  目的地：%s\n  官方后续操作：%s / %s / %s\n  官网动作影响：%v；可恢复性：%s（仅描述，Bridge 不执行）\n  未接入原因：%s (%s)\n  官网认证：%s\n", n.Purpose, n.Primary.Category, n.Primary.TaskGroup, n.DestinationKind, n.Upstream.Status, n.Upstream.Operation, n.Upstream.ExecutionRule, n.Upstream.Effects, n.Upstream.Reversibility, n.Upstream.Reason, n.Upstream.ReasonCode, n.Upstream.Authentication)
-					for _, path := range n.CrossListings {
-						fmt.Fprintf(out, "  交叉入口：%s/%s\n", path.Category, path.TaskGroup)
-					}
-					for _, id := range n.RelatedCapabilities {
-						fmt.Fprintln(out, "  相关能力："+id)
-					}
-					for _, source := range n.Sources {
-						fmt.Fprintf(out, "  入口依据：%s %s\n", source.Title, source.URL)
-					}
-					fmt.Fprintf(out, "  依据核对：%s；本次链接探测：%t\n", n.VerifiedAt, n.LinkCheckedThisCall)
-				}
-			}
-			for _, warning := range response.Warnings {
-				fmt.Fprintln(diagnostics, warning.Code+": "+warning.Message)
-			}
-			if response.Meta.NextCursor != nil {
-				fmt.Fprintln(out, "next_cursor: "+*response.Meta.NextCursor)
-			}
-			return nil
+			return writeResult(out, diagnostics, response, jsonOutput, verbose)
 		})}
-		if !strings.HasSuffix(c.ID, ".get") {
-			command.Flags().IntVar(&limit, "limit", 10, "Maximum items (1-100)")
-			command.Flags().StringVar(&cursor, "cursor", "", "Opaque continuation from the same query")
-		} else {
-			command.Flags().StringVar(&itemID, "item-id", "", "对应列表返回的官方对象 ID（必填）")
-		}
-		if c.ID == "public.notices.search" {
-			command.Flags().StringVar(&query, "query", "", "在近期 RSS 标题与摘要中匹配全部关键词；不是全站搜索")
-		}
-		if c.ID == "life.dining.areas" || c.ID == "life.dining.series" {
-			command.Flags().StringVar(&canteenID, "canteen-id", "", "life.dining.list 返回的食堂 ID（必填）")
-		}
-		if c.ID == "life.dining.series" {
-			command.Flags().StringVar(&day, "day", "", "today、yesterday 或 both（默认）；仅源站当次窗口")
-		}
-		command.Flags().StringVar(&inputFile, "input-file", "", "Read business JSON from a UTF-8 file")
-		command.Flags().BoolVar(&stdinJSON, "input-json-stdin", false, "Read business JSON from stdin (not credentials)")
+		publicInput, businessFlags = addPublicInputFlags(command, c.InputSchema)
+		jsonInput = addJSONInputFlags(command)
+		addBusinessExample(command, c)
 		resource.AddCommand(command)
 	}
 	mcpCommand := &cobra.Command{Use: "mcp", GroupID: "runtime", Short: "启动 MCP stdio 接入（供宿主配置）"}
@@ -218,20 +129,32 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 		return mcpadapter.Serve(cmd.Context(), api)
 	})})
 	root.AddCommand(mcpCommand)
-	addPrivate(root, out, diagnostics, input, &connection)
+	addPrivate(root, out, diagnostics, input, &connection, &jsonOutput, &verbose)
+	root.SetHelpCommand(&cobra.Command{Use: "help [command]", GroupID: "runtime", Short: "查看指定命令的帮助", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		target, remaining, err := root.Find(args)
+		if target == nil {
+			target = root
+		}
+		if err != nil || len(remaining) > 0 {
+			return &cliError{Code: "INVALID_ARGUMENT", Message: "没有找到对应的帮助主题。", Hint: target.CommandPath() + " --help"}
+		}
+		return target.Help()
+	}})
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	completeCommandHelp(root)
+	configureCommandErrors(root)
 	return root
 }
 
 func Execute(ctx context.Context, args []string, out, diagnostics io.Writer, input io.Reader) int {
 	root := New(out, diagnostics, input)
 	root.SetArgs(args)
-	if err := root.ExecuteContext(ctx); err != nil {
-		safe := contracts.Fail("INVALID_ARGUMENT", "Invalid command; use --help")
-		var typed *contracts.Error
-		if errors.As(err, &typed) {
-			safe = typed
+	if cmd, err := root.ExecuteContextC(ctx); err != nil {
+		if cmd == nil {
+			cmd = root
 		}
-		_ = writeJSON(diagnostics, map[string]any{"error": safe})
+		_ = writeError(diagnostics, presentError(cmd, err), jsonRequested(cmd, args))
 		return 1
 	}
 	return 0

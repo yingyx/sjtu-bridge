@@ -73,7 +73,7 @@ func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
 		}
 		out.Reset()
 		diag.Reset()
-		if cli.Execute(ctx, strings.Split(c.ID, "."), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官方后续操作") || !strings.Contains(out.String(), "manual_only") || !strings.Contains(out.String(), "Bridge 不执行") || !strings.Contains(diag.String(), "NAVIGATION_ONLY") {
+		if cli.Execute(ctx, strings.Split(c.ID, "."), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官网入口") || !strings.Contains(out.String(), "需前往官网办理") || !strings.Contains(out.String(), "本次未检查链接") || diag.Len() != 0 {
 			t.Fatal("text output conceals manual boundary", out.String(), diag.String())
 		}
 	}

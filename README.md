@@ -39,13 +39,16 @@ SJTU Bridge 提供统一的访问层，让用户通过命令行查询信息，�
 
 ```powershell
 .\bin\sjtu.exe capabilities search 校历
+.\bin\sjtu.exe capabilities describe public.calendars.list
 .\bin\sjtu.exe public calendars list --json
 .\bin\sjtu.exe library borrowing list --json
 .\bin\sjtu.exe digital software list --json
 .\bin\sjtu.exe life dining series --canteen-id 100 --day both --limit 100 --json
 ```
 
-使用 `--help` 查看命令，使用 `capabilities list` 查看当前可用能力，使用 `capabilities describe 能力ID` 查看输入输出。查询结果包含来源、时间、分页和覆盖范围。
+使用 `--help` 查看命令，使用 `capabilities search 关键词` 查找任务，最相关的能力排在前面；`capabilities describe 能力ID` 给出参数和调用示例。`capabilities list` 浏览当前可用目录，完整契约使用 `capabilities describe 能力ID --verbose` 查看。
+
+CLI 默认提供便于阅读的文本；Agent 使用 `--json` 获取紧凑 JSON，业务结果保留完整来源、时间、分页、范围和警告。追加 `--verbose` 展开详细说明，或为 JSON 增加缩进。公共与个人业务查询均支持 `--input-file` / `--input-json-stdin`；输入方式、发现输出和错误处理见[能力发现](docs/discovery.md)。
 
 ## 接入应用与 Agent
 

@@ -17,7 +17,7 @@ var catalog = []Capability{
 	feedQuery("public.notices.search", "检索近期教务 RSS 摘要", "learning", "notices", "教务处", []string{"教务摘要", "教务搜索", "RSS", "近期教务通知"}, "读取教务处 RSS 的近期最多 50 条通知；可用 query 按空白分词、全部匹配标题与摘要。无匹配仅表示该 feed 未命中。与 public.notices.list 共享公告链接，后者用于归档索引翻页；不读取正文附件。"),
 	feedQuery("life.dining.list", "查询食堂拥挤度概览", "life", "dining", "校园生活", []string{"食堂", "餐厅", "食堂拥挤度", "就餐"}, "读取校园生活食堂概览、食堂 ID 和源站指标。使用 ID 调用 life.dining.areas 查看分区；本调用不遍历分区。概览没有采样时间，零值或过期数据不能解释为空闲或营业保证。"),
 	feedQuery("life.dining.areas", "查询食堂分区拥挤度", "life", "dining", "校园生活", []string{"食堂分区", "食堂楼层", "餐厅拥挤度"}, "用 life.dining.list 的 canteen_id 查询一座食堂的分区及最新采样；标注采样时间、缺失与过期状态。无采样、零值或关闭状态不能解释为空闲；不提供预测、人数或预约。"),
-	feedQuery("life.dining.series", "查询食堂今日与昨日拥挤度曲线", "life", "dining", "校园生活", []string{"食堂曲线", "今日拥挤度", "昨日拥挤度", "拥挤度变化"}, "用 canteen_id 读取源站今日、昨日或两组曲线，逐点分页保留真实日期和原始指标；day 默认 both。仅返回源站当次提供的用餐时段窗口，不宣称全天，不插值、不抽样、不积累后台历史。请按 next_cursor 读完该窗口。"),
+	feedQuery("life.dining.series", "查询食堂今日与昨日拥挤度曲线", "life", "dining", "校园生活", []string{"食堂曲线", "今日拥挤度", "昨日拥挤度", "拥挤度变化"}, "用 canteen_id 读取源站当前用餐时段窗口的今日、昨日或两组曲线，逐点分页保留真实日期和原始指标；day 默认 both。不宣称全天，不插值、不抽样、不积累后台历史。请按 next_cursor 读完该窗口。"),
 	{
 		ID: "public.services.list", ContractVersion: "1",
 		Title: "查找校园网站入口", Category: "campus", CategoryLabel: "校情与导览", TaskGroup: "directory", TaskGroupLabel: "机构与官方入口", Service: "校园网站目录",
@@ -151,8 +151,9 @@ type CapabilityFilter struct {
 }
 
 // FilterCapabilities only searches the caller's already authorized catalog.
-// Terms are case-insensitive substrings and all terms must match; ordering is
-// stable by capability ID. No network, database, or semantic model is involved.
+// Terms are case-insensitive substrings and all terms must match. Searches rank
+// exact tasks before keywords and classification; lists remain ordered by ID.
+// No network, database, or semantic model is involved.
 func FilterCapabilities(caps []Capability, filter CapabilityFilter) ([]Capability, error) {
 	if !utf8.ValidString(filter.Query) || !utf8.ValidString(filter.Category) || !utf8.ValidString(filter.TaskGroup) || !utf8.ValidString(filter.Service) || utf8.RuneCountInString(filter.Query) > 256 || len(filter.Category) > 128 || len(filter.TaskGroup) > 128 || len(filter.Service) > 128 {
 		return nil, Fail("INVALID_ARGUMENT", "Search query must be valid UTF-8 and at most 256 characters; filters at most 128 bytes")
@@ -160,7 +161,36 @@ func FilterCapabilities(caps []Capability, filter CapabilityFilter) ([]Capabilit
 	terms := strings.Fields(strings.ToLower(filter.Query))
 	category, service := strings.TrimSpace(filter.Category), strings.TrimSpace(filter.Service)
 	group := strings.TrimSpace(filter.TaskGroup)
+	if category != "" {
+		known := false
+		allowed := make([]string, 0, len(categoryLabels))
+		for id, label := range categoryLabels {
+			known = known || strings.EqualFold(category, id) || strings.EqualFold(category, label)
+			allowed = append(allowed, id)
+		}
+		if !known {
+			sort.Strings(allowed)
+			return nil, Fail("INVALID_ARGUMENT", "未知 --category 筛选值；可用分类 ID："+strings.Join(allowed, "、"))
+		}
+	}
+	if group != "" {
+		known := false
+		allowedIDs := map[string]bool{}
+		for path, label := range taskGroupLabels {
+			known = known || strings.EqualFold(group, path.TaskGroup) || strings.EqualFold(group, label)
+			allowedIDs[path.TaskGroup] = true
+		}
+		if !known {
+			allowed := make([]string, 0, len(allowedIDs))
+			for id := range allowedIDs {
+				allowed = append(allowed, id)
+			}
+			sort.Strings(allowed)
+			return nil, Fail("INVALID_ARGUMENT", "未知 --task-group 筛选值；可用任务组 ID："+strings.Join(allowed, "、"))
+		}
+	}
 	result := []Capability{}
+	scores := map[string]int{}
 	for _, c := range caps {
 		if !c.Authorized || (service != "" && !strings.EqualFold(service, c.Service)) {
 			continue
@@ -177,36 +207,89 @@ func FilterCapabilities(caps []Capability, filter CapabilityFilter) ([]Capabilit
 		if !pathMatch {
 			continue
 		}
-		fields := []string{c.ID, c.Title, c.Category, c.CategoryLabel, c.TaskGroup, c.TaskGroupLabel, c.Service, c.Provider}
-		for _, path := range c.CrossListings {
-			fields = append(fields, pathFields(path)...)
-		}
-		fields = append(fields, c.Aliases...)
-		fields = append(fields, c.Keywords...)
-		haystack := strings.ToLower(strings.Join(fields, "\n"))
-		matched := true
-		for _, term := range terms {
-			if !strings.Contains(haystack, term) {
-				matched = false
-				break
-			}
-		}
+		score, matched := capabilitySearchScore(c, terms)
 		if matched {
 			result = append(result, cloneCapability(c))
+			scores[c.ID] = score
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	sort.Slice(result, func(i, j int) bool {
+		if scores[result[i].ID] != scores[result[j].ID] {
+			return scores[result[i].ID] > scores[result[j].ID]
+		}
+		return result[i].ID < result[j].ID
+	})
 	return result, nil
 }
 
-// CapabilitySummaries omits potentially large schemas; describe and SDK/MCP
-// discovery retain full contracts including the granted resource constraints.
-func CapabilitySummaries(caps []Capability) []Capability {
-	result := make([]Capability, 0, len(caps))
+func capabilitySearchScore(c Capability, terms []string) (int, bool) {
+	primary := append([]string{c.ID, c.Title}, c.Aliases...)
+	keywords := append([]string{c.Service, c.Provider}, c.Keywords...)
+	classification := []string{c.Category, c.CategoryLabel, c.TaskGroup, c.TaskGroupLabel}
+	for _, path := range c.CrossListings {
+		classification = append(classification, pathFields(path)...)
+	}
+	contains := func(fields []string, term string) bool {
+		for _, field := range fields {
+			if strings.Contains(strings.ToLower(field), term) {
+				return true
+			}
+		}
+		return false
+	}
+	score := 0
+	for _, term := range terms {
+		switch {
+		case contains(primary, term):
+			score += 1000
+		case contains(keywords, term):
+			score += 100
+		case contains(classification, term):
+			score++
+		default:
+			return 0, false
+		}
+	}
+	query := strings.Join(terms, " ")
+	if query != "" {
+		for _, field := range primary {
+			if strings.EqualFold(strings.Join(strings.Fields(field), " "), query) {
+				score += 1000000
+				break
+			}
+		}
+	}
+	return score, true
+}
+
+// CapabilitySummary is the task-oriented discovery view. Execution policy and
+// full contracts remain available separately and are never inferred from it.
+type CapabilitySummary struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	CLICommand  string   `json:"cli_command"`
+	MCPTool     string   `json:"mcp_tool"`
+	Delivery    Delivery `json:"delivery"`
+	Category    string   `json:"category"`
+	Service     string   `json:"service"`
+}
+
+// CapabilitySummaries returns only task selection and invocation information.
+// SDK/MCP discovery retains full contracts and granted resource constraints.
+func CapabilitySummaries(caps []Capability) []CapabilitySummary {
+	result := make([]CapabilitySummary, 0, len(caps))
 	for _, c := range caps {
 		c = cloneCapability(c)
-		c.InputSchema, c.OutputSchema = nil, nil
-		result = append(result, c)
+		description := strings.TrimSpace(c.Description)
+		if end := strings.IndexAny(description, "。；\n"); end >= 0 {
+			description = description[:end] + "。"
+		}
+		result = append(result, CapabilitySummary{
+			ID: c.ID, Title: c.Title, Description: description,
+			CLICommand: c.CLICommand, MCPTool: c.MCPTool, Delivery: c.Delivery,
+			Category: c.Category, Service: c.Service,
+		})
 	}
 	return result
 }

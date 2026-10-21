@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		ids  []string
 	}{
 		{[]string{"list"}, []string{"administration.fees.get", "administration.fees.list", "administration.payments.navigate", "campus.buildings.list", "campus.maps.navigate", "campus.organizations.list", "development.activities.navigate", "development.notices.get", "development.notices.list", "digital.network.navigate", "digital.software.list", "digital.software.navigate", "digital.support.list", "learning.practice.navigate", "learning.semester.current", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.dining.series", "life.health.get", "life.health.list", "life.sports.navigate", "life.utilities.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
-		{[]string{"search", "校历"}, []string{"learning.semester.current", "public.calendars.list"}},
+		{[]string{"search", "校历"}, []string{"public.calendars.list", "learning.semester.current"}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list", "public.notices.search"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},
 		{[]string{"search", "作业"}, []string{}},
@@ -64,23 +65,164 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		if Execute(context.Background(), args, &out, &diag, strings.NewReader("")) != 0 {
 			t.Fatal(diag.String())
 		}
-		var caps []contracts.Capability
+		var caps []contracts.CapabilitySummary
 		if json.Unmarshal(out.Bytes(), &caps) != nil || caps == nil || len(caps) != len(test.ids) {
 			t.Fatal(out.String())
 		}
 		for i, c := range caps {
-			if c.ID != test.ids[i] || c.Title == "" || c.Service == "" || c.Category == "" || c.CLICommand == "" || c.MCPTool == "" || len(c.Aliases) == 0 || c.InputSchema != nil || c.OutputSchema != nil {
+			if c.ID != test.ids[i] || c.Title == "" || c.Description == "" || c.Service == "" || c.Category == "" || c.CLICommand == "" || c.MCPTool == "" {
 				t.Fatal(out.String())
 			}
 		}
 	}
 	var out, diag bytes.Buffer
-	if Execute(context.Background(), []string{"capabilities", "describe", "public.calendars.list"}, &out, &diag, strings.NewReader("")) != 0 {
+	if Execute(context.Background(), []string{"capabilities", "describe", "public.calendars.list", "--verbose"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
 	var detail contracts.Capability
 	if json.Unmarshal(out.Bytes(), &detail) != nil || len(detail.InputSchema) == 0 || len(detail.OutputSchema) == 0 {
 		t.Fatal("missing detail", out.String())
+	}
+	if !strings.Contains(out.String(), "\n  ") {
+		t.Fatal("verbose JSON should be readable", out.String())
+	}
+}
+
+func TestDiscoveryUsesTaskSummariesAndActionableDescriptions(t *testing.T) {
+	for _, args := range [][]string{
+		{"capabilities", "search", "食堂曲线"},
+		{"capabilities", "search", "食堂曲线", "--json"},
+	} {
+		var out, diag bytes.Buffer
+		if Execute(context.Background(), args, &out, &diag, strings.NewReader("")) != 0 {
+			t.Fatal(diag.String())
+		}
+		if !strings.Contains(out.String(), "sjtu life dining series") || strings.Contains(out.String(), "execution_rule") || strings.Contains(out.String(), "reversibility") || strings.Contains(out.String(), "不提供轮询") {
+			t.Fatal("default discovery is not concise", out.String())
+		}
+	}
+	var out, diag bytes.Buffer
+	if Execute(context.Background(), []string{"capabilities", "describe", "life.dining.series"}, &out, &diag, strings.NewReader("")) != 0 {
+		t.Fatal(diag.String())
+	}
+	for _, wanted := range []string{"--canteen-id", "--day", "必填", "today", "sjtu life dining series"} {
+		if !strings.Contains(out.String(), wanted) {
+			t.Fatalf("missing %s: %s", wanted, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "output_schema") {
+		t.Fatal("default describe expanded output schema")
+	}
+	out.Reset()
+	diag.Reset()
+	if Execute(context.Background(), []string{"capabilities", "describe", "life.dining.areas", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+		t.Fatal(diag.String())
+	}
+	var usage capabilityUsage
+	if json.Unmarshal(out.Bytes(), &usage) != nil || len(usage.InputSchema) == 0 || usage.CLIFlags["canteen_id"] != "--canteen-id" || usage.Example == "" {
+		t.Fatal("incomplete JSON call guide", out.String())
+	}
+	if strings.Contains(out.String(), "output_schema") || strings.Contains(out.String(), "execution_rule") {
+		t.Fatal("default JSON call guide contains full contract", out.String())
+	}
+	if strings.Count(out.String(), "\n") != 1 {
+		t.Fatal("default JSON should be compact", out.String())
+	}
+}
+
+func TestDescribeSuggestionsUseOnlyVisibleCapabilities(t *testing.T) {
+	var out, diag bytes.Buffer
+	if Execute(context.Background(), []string{"capabilities", "describe", "public.calendars.lsit", "--json"}, &out, &diag, strings.NewReader("")) == 0 || !strings.Contains(diag.String(), "public.calendars.list") || out.Len() != 0 {
+		t.Fatal("missing visible spelling suggestion", out.String(), diag.String())
+	}
+	hidden := contracts.AssignmentCapability("canvas:user:7", []string{"canvas:course:1"}, "deadlines_v1", 10)
+	hidden.Authorized = false
+	err := unavailableCapability("canvas.assignments.lis", []contracts.Capability{hidden})
+	if err == nil || strings.Contains(err.Error(), contracts.AssignmentsCapability) || strings.Contains(err.Error(), "canvas:user") {
+		t.Fatal("suggestion leaked hidden capability", err)
+	}
+}
+
+func TestPersonalDescribeMapsSchemaToCLIFlags(t *testing.T) {
+	root := New(io.Discard, io.Discard, strings.NewReader(""))
+	c := contracts.AssignmentCapability("canvas:user:7", []string{"canvas:course:1"}, "deadlines_v1", 3)
+	var out bytes.Buffer
+	if err := writeCapabilityUsage(&out, root, c, true); err != nil {
+		t.Fatal(err)
+	}
+	var usage capabilityUsage
+	if json.Unmarshal(out.Bytes(), &usage) != nil || usage.CLIFlags["account_ref"] != "--account" || usage.CLIFlags["course_ref"] != "--course" || !strings.Contains(usage.Example, "--limit 3") || strings.Count(usage.Example, "--connection CONNECTION_FILE") != 1 {
+		t.Fatal(out.String())
+	}
+}
+
+func TestConnectedPublicGuidePreservesContextWithoutExposingPath(t *testing.T) {
+	var capability contracts.Capability
+	for _, c := range contracts.PublicCapabilities() {
+		if c.ID == "public.services.list" {
+			capability = c
+		}
+	}
+	capability.InputSchema = contracts.PublicInputSchema(capability.ID)
+	for _, connected := range []bool{false, true} {
+		root := New(io.Discard, io.Discard, strings.NewReader(""))
+		if connected {
+			if err := root.PersistentFlags().Set("connection", "C:/SYNTHETIC_PRIVATE_PATH/connection.json"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, asJSON := range []bool{false, true} {
+			var out bytes.Buffer
+			if err := writeCapabilityUsage(&out, root, capability, asJSON); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out.String(), "SYNTHETIC_PRIVATE_PATH") || strings.Contains(out.String(), "--connection CONNECTION_FILE") != connected {
+				t.Fatalf("connection context lost or path exposed: %s", out.String())
+			}
+			if asJSON {
+				var usage capabilityUsage
+				if json.Unmarshal(out.Bytes(), &usage) != nil || strings.Count(usage.Example, "--connection") != map[bool]int{false: 0, true: 1}[connected] {
+					t.Fatal(out.String())
+				}
+			}
+		}
+		summary := discoverySummaries([]contracts.Capability{capability}, connected)[0]
+		if strings.HasSuffix(summary.CLICommand, " --connection CONNECTION_FILE") != connected {
+			t.Fatal("summary lost connection context", summary)
+		}
+	}
+	if strings.Contains(contracts.CapabilitySummaries([]contracts.Capability{capability})[0].CLICommand, "--connection") {
+		t.Fatal("CLI context changed the shared capability mapping")
+	}
+}
+
+func TestDiscoveryRejectsUnknownFilters(t *testing.T) {
+	for _, flags := range [][]string{{"--category", "learnng"}, {"--task-group", "SYNTHETIC_PRIVATE_VALUE"}} {
+		for _, verb := range [][]string{{"list"}, {"search", "校历"}} {
+			args := append([]string{"capabilities"}, verb...)
+			args = append(args, flags...)
+			args = append(args, "--json")
+			var out, diag bytes.Buffer
+			if Execute(context.Background(), args, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "INVALID_ARGUMENT") || !strings.Contains(diag.String(), flags[0]) || strings.Contains(diag.String(), "SYNTHETIC_PRIVATE_VALUE") {
+				t.Fatal(args, out.String(), diag.String())
+			}
+		}
+	}
+}
+
+func TestDiscoveryDoesNotReportSuccessWhenOutputFails(t *testing.T) {
+	for _, args := range [][]string{
+		{"capabilities", "list"},
+		{"capabilities", "search", "校历"},
+		{"capabilities", "search", "no-such-synthetic-task"},
+		{"capabilities", "describe", "public.services.list"},
+		{"capabilities", "describe", "public.services.list", "--json"},
+		{"capabilities", "describe", "public.services.list", "--verbose"},
+	} {
+		var diag bytes.Buffer
+		if Execute(context.Background(), args, failingOutput{}, &diag, strings.NewReader("")) == 0 || !strings.Contains(diag.String(), "INTERNAL_ERROR") {
+			t.Fatal("output failure reported as success", args, diag.String())
+		}
 	}
 }
 
