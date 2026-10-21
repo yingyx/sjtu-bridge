@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"time"
 
@@ -32,6 +33,15 @@ func NewSecure(host string, allowed func(*url.URL) bool) *SecureClient {
 		return dialPublic(ctx, host, address)
 	}
 	return &SecureClient{client: &http.Client{Transport: tr, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, allowed: allowed}
+}
+
+// NewAnonymousSession retains only cookies issued to this independent client.
+// Providers still control exact destinations and bootstrap their own public
+// session; redirects remain disabled and no browser credentials are imported.
+func NewAnonymousSession(host string, allowed func(*url.URL) bool) *SecureClient {
+	c := NewSecure(host, allowed)
+	c.client.Jar, _ = cookiejar.New(nil)
+	return c
 }
 
 func dialPublic(ctx context.Context, host, address string) (net.Conn, error) {

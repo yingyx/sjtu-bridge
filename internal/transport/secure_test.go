@@ -15,6 +15,48 @@ type publicRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f publicRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestAnonymousSessionKeepsOnlyItsOwnCookiesAndDoesNotFollowRedirects(t *testing.T) {
+	predicate := func(u *url.URL) bool {
+		return ExactHTTPS(u, "ids.sjtu.edu.cn") && (u.Path == "/" || u.Path == "/read") && u.RawQuery == ""
+	}
+	c := NewAnonymousSession("ids.sjtu.edu.cn", predicate)
+	other := NewAnonymousSession("ids.sjtu.edu.cn", predicate)
+	defer c.Close()
+	defer other.Close()
+	calls := 0
+	c.client.Transport = publicRoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Header.Get("Authorization") != "" {
+			t.Fatal("unexpected authorization")
+		}
+		if r.URL.Path == "/" {
+			if r.Header.Get("Cookie") != "" {
+				t.Fatal("bootstrap imported cookies")
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{"Set-Cookie": {"WebSession=SYNTHETIC_ANONYMOUS; Secure; HttpOnly; Path=/"}}, Body: io.NopCloser(strings.NewReader("public"))}, nil
+		}
+		if r.Header.Get("Cookie") != "WebSession=SYNTHETIC_ANONYMOUS" {
+			t.Fatal("anonymous cookie was not retained")
+		}
+		return &http.Response{StatusCode: 302, Header: http.Header{"Location": {"http://ids.sjtu.edu.cn/login"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})
+	root, _ := url.Parse("https://ids.sjtu.edu.cn/")
+	read, _ := url.Parse("https://ids.sjtu.edu.cn/read")
+	if _, err := c.Get(context.Background(), root, nil); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := c.Post(context.Background(), read, nil, nil); err != nil || reply.Status != 302 || calls != 2 {
+		t.Fatal(reply.Status, err, calls)
+	}
+	if len(other.client.Jar.Cookies(root)) != 0 {
+		t.Fatal("anonymous sessions shared cookies")
+	}
+	bad, _ := url.Parse("https://ids.sjtu.edu.cn/unreviewed")
+	if _, err := c.Get(context.Background(), bad, nil); err == nil || calls != 2 {
+		t.Fatal("unreviewed endpoint reached transport")
+	}
+}
+
 func TestAnonymousSecureRequestWithNilHeaders(t *testing.T) {
 	c := NewSecure("www.sjtu.edu.cn", func(u *url.URL) bool { return ExactHTTPS(u, "www.sjtu.edu.cn") && u.Path == "/jgsz/index.html" })
 	defer c.Close()
