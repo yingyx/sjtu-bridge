@@ -16,12 +16,23 @@ type Invocation struct {
 }
 
 type ListInput struct {
-	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum items per call (1-100), default 10"`
-	Cursor    string `json:"cursor,omitempty" jsonschema:"Opaque continuation from the same capability and limit; expires after 15 minutes"`
-	Query     string `json:"query,omitempty" jsonschema:"Keywords matched against recent RSS titles and summaries only"`
-	CanteenID string `json:"canteen_id,omitempty" jsonschema:"Reviewed parent canteen ID returned by life.dining.list"`
-	Day       string `json:"day,omitempty" jsonschema:"Source dining series: today, yesterday or both (default both)"`
-	ItemID    string `json:"item_id,omitempty" jsonschema:"Official object ID returned by the corresponding list capability"`
+	Limit        int                 `json:"limit,omitempty" jsonschema:"Maximum items per call (1-100), default 10"`
+	Cursor       string              `json:"cursor,omitempty" jsonschema:"Opaque continuation from the same capability and limit; expires after 15 minutes"`
+	Query        string              `json:"query,omitempty" jsonschema:"Bounded keywords with the matching capability's documented search scope"`
+	CanteenID    string              `json:"canteen_id,omitempty" jsonschema:"Reviewed parent canteen ID returned by life.dining.list"`
+	Day          string              `json:"day,omitempty" jsonschema:"Source dining series: today, yesterday or both (default both)"`
+	ItemID       string              `json:"item_id,omitempty" jsonschema:"Official object ID returned by the corresponding list capability"`
+	BuildingID   string              `json:"building_id,omitempty" jsonschema:"IDS teaching building ID returned by campus.buildings.list"`
+	RoomID       string              `json:"room_id,omitempty" jsonschema:"IDS classroom ID returned by learning.classrooms.list"`
+	Date         string              `json:"date,omitempty" jsonschema:"Date in Asia/Shanghai, YYYY-MM-DD"`
+	RoomType     string              `json:"room_type,omitempty" jsonschema:"IDS room type returned by learning.classrooms.types"`
+	CampusID     string              `json:"campus_id,omitempty" jsonschema:"Reviewed IDS campus ID"`
+	OrgID        string              `json:"org_id,omitempty" jsonschema:"IDS contact organization ID returned by campus.contacts.list"`
+	Kind         string              `json:"kind,omitempty" jsonschema:"Lost property notice kind: looking_for_item or looking_for_owner"`
+	StartSection int                 `json:"start_section,omitempty" jsonschema:"First teaching section, inclusive"`
+	EndSection   int                 `json:"end_section,omitempty" jsonschema:"Last teaching section, inclusive"`
+	RoomFeatures map[string][]string `json:"room_features,omitempty" jsonschema:"Reviewed IDS facility filter codes mapped to option IDs"`
+	SeatRange    string              `json:"seat_range,omitempty" jsonschema:"IDS classroom capacity bracket"`
 }
 
 type Item struct {

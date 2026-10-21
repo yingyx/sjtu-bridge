@@ -200,3 +200,50 @@ func TestEndpointPredicateCannotReachBookingOrCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestExtendedPaginationBindsFiltersBeforeAnyNetworkRequest(t *testing.T) {
+	f := &facilityFake{rows: map[string]string{"/release/findLostList": `{"list":[{"id":1,"title":"合成雨伞","roomName":"合成楼","createTime":"2030-10-03T08:00:00Z","area":3},{"id":2,"title":"合成水杯","roomName":"合成楼","createTime":"2030-10-03T08:00:00Z","area":3}]}`}}
+	p := &Provider{client: f, now: func() time.Time { return time.Date(2030, 10, 3, 8, 0, 0, 0, time.UTC) }}
+	bootstraps := 0
+	p.bootstrap = func(context.Context) error { bootstraps++; return nil }
+	in := contracts.ListInput{Limit: 1, Kind: "looking_for_item"}
+	first, err := p.List(context.Background(), LostFound, in)
+	if err != nil || first.Meta.NextCursor == nil {
+		t.Fatal(first, err)
+	}
+	in.Cursor = *first.Meta.NextCursor
+	changed := in
+	changed.Kind = "looking_for_owner"
+	if _, err := p.List(context.Background(), LostFound, changed); err == nil || len(f.calls) != 1 || bootstraps != 1 {
+		t.Fatal("changed filter reached network", err, f.calls, bootstraps)
+	}
+	second, err := p.List(context.Background(), LostFound, in)
+	if err != nil || second.Data.Items[0].SourceID != "2" || second.Meta.HasMore {
+		t.Fatal(second, err)
+	}
+	for _, input := range []contracts.ListInput{{Limit: 1, Day: "today"}, {Limit: 1, ItemID: "1"}, {Limit: 1, RoomFeatures: map[string][]string{"TYPE": {"1"}}}} {
+		before := len(f.calls)
+		if _, err := p.List(context.Background(), Buildings, input); err == nil || len(f.calls) != before {
+			t.Fatal("unrelated filter reached network", err)
+		}
+	}
+}
+
+func TestAnonymousBootstrapFailureStopsBusinessQuery(t *testing.T) {
+	f := &fake{body: buildingFixture, media: "application/json", status: 200}
+	p := testProvider(f)
+	p.bootstrap = func(context.Context) error {
+		return contracts.Fail("UPSTREAM_UNAVAILABLE", "Anonymous session unavailable")
+	}
+	if _, err := p.List(context.Background(), Buildings, contracts.ListInput{Limit: 1}); err == nil || f.calls != 0 {
+		t.Fatal("failed bootstrap reached query", err, f.calls)
+	}
+}
+
+func TestEmptyClassroomFeaturesHaveNoFilterSemantics(t *testing.T) {
+	for _, features := range []map[string][]string{nil, {}} {
+		if err := validateInput(Classrooms, contracts.ListInput{Limit: 1, BuildingID: "11", RoomFeatures: features}); err != nil {
+			t.Fatal("Empty feature selection rejected", err)
+		}
+	}
+}
