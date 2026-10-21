@@ -1,8 +1,15 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/broker"
 )
 
 func TestReuseLoginTargetsRequiresActiveCampusSource(t *testing.T) {
@@ -59,5 +66,71 @@ func TestReuseLoginTargetsExplicitActivityPortal(t *testing.T) {
 	raw = []byte(`{"credentials":{"source":{"provider":"activity","kind":"JAAuthCookie","active":true}}}`)
 	if _, e = reuseLoginTargets(raw, "source", []string{"activity"}, true); e == nil {
 		t.Fatal("activity source selected as its own target")
+	}
+}
+
+func TestPortalLoginRetainsCommittedStateAndPerPortalFailures(t *testing.T) {
+	results := []portalLoginResult{
+		{Provider: "teaching", Status: "verified", AccountRef: "synthetic:teaching"},
+		{Provider: "sjtumail", Status: "verified", AccountRef: "synthetic:mail"},
+		{Provider: "activity"},
+	}
+	recordPortalLoginFailure(&results[2], contracts.Fail("UPSTREAM_CHANGED", "Synthetic portal structure changed"), false)
+	calls := []string{}
+	importVerifiedPortals(context.Background(), results, nil, "synthetic-source", "main", func(_ context.Context, q broker.AdminRequest, out any) error {
+		calls = append(calls, q.Provider)
+		if q.Action != "import" || q.SourceCredentialID != "synthetic-source" || q.ExpectedAccount == "" || q.Label != "main" {
+			t.Fatal("import lost its verified context")
+		}
+		if q.Provider == "sjtumail" {
+			return contracts.Fail("AUDIT_UNAVAILABLE", "State committed; audit unavailable")
+		}
+		return json.Unmarshal([]byte(`{"credential_id":"synthetic-credential"}`), out)
+	})
+	if !reflect.DeepEqual(calls, []string{"teaching", "sjtumail"}) {
+		t.Fatal("unverified portal was imported", calls)
+	}
+	if results[0].Status != "imported" || results[0].CredentialID != "synthetic-credential" || !results[0].StateCommitted {
+		t.Fatal("successful import lost", results[0])
+	}
+	if results[1].Status != "imported_audit_failed" || !results[1].StateCommitted || results[1].ErrorCode != "AUDIT_UNAVAILABLE" || !strings.Contains(results[1].Hint, "auth status") {
+		t.Fatal("committed import mislabeled", results[1])
+	}
+	if results[2].Status != "verification_failed" || results[2].ErrorCode != "UPSTREAM_CHANGED" || !strings.Contains(results[2].Message, "structure changed") {
+		t.Fatal("portal failure reason lost", results[2])
+	}
+	var issue *cliError
+	if !errors.As(loginResultsError(results), &issue) || issue.Code != "PARTIAL_FAILURE" {
+		t.Fatal("partial failure reported as authentication failure", issue)
+	}
+}
+
+func TestPortalLoginFailureDoesNotGuessCommitOrAuthenticationState(t *testing.T) {
+	for _, test := range []struct {
+		name, code string
+		failure    error
+		importing  bool
+	}{
+		{"verification", "UPSTREAM_UNAVAILABLE", contracts.Fail("UPSTREAM_UNAVAILABLE", "Synthetic unavailable portal"), false},
+		{"import", "BROKER_UNAVAILABLE", contracts.Fail("BROKER_UNAVAILABLE", "Synthetic lost connection"), true},
+		{"unknown", "CHECK_FAILED", errors.New("sensitive raw transport detail"), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := portalLoginResult{Provider: "teaching"}
+			recordPortalLoginFailure(&result, test.failure, test.importing)
+			if result.StateCommitted || result.ErrorCode != test.code || strings.Contains(result.Message, "sensitive") {
+				t.Fatal(result)
+			}
+			if test.importing && !strings.Contains(result.Hint, "auth status") {
+				t.Fatal("ambiguous import must direct state inspection", result)
+			}
+			var issue *cliError
+			if !errors.As(loginResultsError([]portalLoginResult{result}), &issue) || issue.Code != test.code {
+				t.Fatal("failure reason collapsed", issue)
+			}
+		})
+	}
+	if err := loginResultsError([]portalLoginResult{{Status: "imported", StateCommitted: true}}); err != nil {
+		t.Fatal(err)
 	}
 }
