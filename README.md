@@ -22,7 +22,7 @@ SJTU Bridge 提供统一的访问层，让用户通过命令行查询信息，�
 
 当前接入包括：
 
-- **公开数据查询**：校历与教务公告索引、借阅规则与适用条件、食堂最新采样及今日/昨日时段曲线、校医院和团委公告归档与正文、收费公示及 HTML 内容，以及教学建筑、当前学期、软件、超算硬件、网络支持和机构目录。各项覆盖范围见能力描述，无需登录。
+- **公开数据查询**：校历与教务公告、借阅规则、食堂采样及今日/昨日时段曲线、医院与团委公告归档和正文、收费公示；IDS 学期节次、教室筛选与设施、单日课表、未排课教室、课程检索、建筑楼层、通知、办公联系及失物索引；软件、超算硬件、网络支持和机构目录。各项覆盖范围见能力描述，无需登录。
 - **个人只读查询**：Canvas 作业、教务课表、邮箱标题、校园活动列表和本人绑定宿舍电量。按应用限定账号、资源与字段，支持独立撤销。
 - **官方服务导航**：定位第二课堂、宿舍洗浴、软件授权、场馆预约及缴费等业务入口，明确查询范围和接入状态。
 
@@ -43,6 +43,7 @@ SJTU Bridge 提供统一的访问层，让用户通过命令行查询信息，�
 .\bin\sjtu.exe public calendars list --json
 .\bin\sjtu.exe library borrowing list --json
 .\bin\sjtu.exe digital software list --json
+.\bin\sjtu.exe learning classrooms types --json
 .\bin\sjtu.exe life dining series --canteen-id 100 --day both --limit 100 --json
 ```
 
