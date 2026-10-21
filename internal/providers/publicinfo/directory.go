@@ -2,7 +2,7 @@ package publicinfo
 
 import "github.com/yingyx/sjtu-bridge/contracts"
 
-const directoryRevision = "bundled:2026-10-20-v2"
+const directoryRevision = "bundled:2026-10-21-v3"
 
 // These reviewed locators are navigation metadata, never execution grants.
 // Keep independently operated portals separate even when a task crosses them.
@@ -12,7 +12,7 @@ func directory() []contracts.Item {
 		{"teaching", "教学信息服务网", "https://i.sjtu.edu.cn/", "learning.courses", "learning.timetable.list"},
 		{"canvas", "在线教学平台 Canvas", "https://oc.sjtu.edu.cn/", "learning.courses", "canvas.assignments.list"},
 		{"library", "学校图书馆", "https://www.lib.sjtu.edu.cn/", "library.resources", "library.borrowing.list,library.loans.navigate,library.spaces.navigate"},
-		{"ids", "数字化教学服务平台 IDS", "https://ids.sjtu.edu.cn/", "campus.maps", "campus.buildings.list,learning.semester.current"},
+		{"ids", "数字化教学服务平台 IDS", "https://ids.sjtu.edu.cn/", "learning.schedule", "learning.semester.current,learning.semester.periods,learning.classrooms.types,learning.classrooms.filters,learning.classrooms.list,learning.classrooms.details,learning.classrooms.schedule,learning.classrooms.available,learning.courses.search,campus.buildings.list,campus.buildings.details,campus.notices.list,campus.notices.get,campus.contacts.list,campus.contacts.details,life.lostfound.list,learning.classrooms.navigate,life.lostfound.navigate"},
 		{"activity", "校园活动平台", "https://activity.sjtu.edu.cn/", "development.activities", "development.activities.list,development.activities.navigate"},
 		{"electric", "宿舍电费", "https://elec.sjtu.edu.cn/", "life.utilities", "life.electricity.balance,life.utilities.navigate"},
 		{"bath", "宿舍洗浴", "https://bath.sjtu.edu.cn/ui/index", "life.utilities", "life.utilities.navigate"},

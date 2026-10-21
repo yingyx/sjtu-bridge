@@ -67,6 +67,22 @@ var catalog = []Capability{
 	navigation("digital.software.navigate", "定位正版软件授权与获取入口", "digital", "software", "正版软件中心", []string{"正版软件", "软件下载", "软件激活", "软件授权"}, []string{"software", "license", "activation"}, nil),
 	idsQuery("campus.buildings.list", "查询教学建筑目录", "campus", "maps", []string{"教学楼", "IDS建筑", "校区教学建筑"}, "匿名读取 IDS 发布的教学建筑名称及所属校区；仅覆盖源站教学建筑目录，不代表全部校园建筑、教室空闲、开放或可预约状态。"),
 	idsQuery("learning.semester.current", "查询 IDS 当前学期", "learning", "schedule", []string{"当前学期", "当前学年", "IDS周次"}, "匿名读取 IDS 当前学年、学期和源站原始周次；不计算节假日或教学周，不代表个人课表或完整校历。"),
+	idsQuery("learning.semester.periods", "查询 IDS 上课节次与时间", "learning", "schedule", []string{"上课时间", "节次时间", "教学节次", "作息时间"}, "读取 IDS 发布的教学节次及起止时间，供教室课表与单日自习查询使用；不推断放假、调休或个人课程。"),
+	idsQuery("learning.classrooms.types", "查询 IDS 教室类型", "learning", "schedule", []string{"教室类型", "教室分类", "多媒体教室"}, "读取 IDS 教室类型及源站编码，作为教室目录的过滤条件；类型不表示开放或借用资格。"),
+	idsQuery("learning.classrooms.filters", "查询教室设施筛选项", "learning", "schedule", []string{"教室设施筛选", "教室筛选项", "教室设备筛选"}, "读取 IDS 公开教室设施筛选编码、可选值及单选/多选规则，用于 learning.classrooms.list 的 room_features；选项不代表设备实时可用状态。"),
+	idsQuery("learning.classrooms.list", "查询教学楼教室目录", "learning", "schedule", []string{"教室目录", "找教室", "教室容量"}, "用 campus.buildings.list 返回的 building_id 查询一座教学楼的教室，可按 room_type、seat_range 和 room_features 过滤；类型与设施选项先查 types/filters。按 next_cursor 继续读取，目录不代表教室当前空闲、开放或可借用。"),
+	idsQuery("learning.classrooms.details", "查询教室设施详情", "learning", "schedule", []string{"教室设施", "教室设备", "教室详情"}, "用教室目录返回的 room_id 读取该教室公开设施信息；仅保留公开字段，不控制设备、不访问实时监控。"),
+	idsQuery("learning.classrooms.schedule", "查询教学楼单日教室课表", "learning", "schedule", []string{"教室课表", "教室占用", "教学楼课表"}, "按 building_id 和 date 查询一座教学楼单日课程安排，分页保留源站日期、节次与地点；不是本人课表，也不保证未排课教室开放或可预约。不提供批量全校扫描或后台监测。"),
+	idsQuery("learning.classrooms.available", "查询单楼单日未排课教室", "learning", "schedule", []string{"空闲教室", "自习教室", "找自习室", "未排课教室"}, "按 building_id、date 及连续 start_section/end_section 查询一座教学楼的源站未排课教室。仅供按需查找自习场所，不保证实际开放、无临时占用或可借用；不提供轮询、余量告警或自动预约。"),
+	idsQuery("learning.courses.search", "检索 IDS 单日公开课程", "learning", "schedule", []string{"课程地点", "公开课程查询", "IDS课程搜索"}, "用 query 在指定 campus_id 和 date 内检索源站公开课程安排；仅匹配该范围，不是教务课程目录或个人课表，不遍历全部校区或日期。"),
+	idsQuery("campus.buildings.details", "查询教学建筑导览与设施", "campus", "maps", []string{"教学楼详情", "教学楼设施", "教学楼导览"}, "用教学建筑目录的 building_id 读取源站公开导览与设施信息；3D 展示与需要身份的实时动态由官网提供，不访问监控、不控制设备。"),
+	idsQuery("campus.notices.list", "查询 IDS 教学楼服务公告", "learning", "notices", []string{"IDS公告", "教学楼服务公告", "教学楼通知"}, "分页读取 IDS 公告标题与官方详情入口；以 campus.notices.get 按需读取正文，不代表教务通知全集。"),
+	idsQuery("campus.notices.get", "读取 IDS 服务公告正文", "learning", "notices", []string{"IDS公告正文", "教学楼公告详情"}, "用 campus.notices.list 返回的 item_id 读取一篇公开公告正文；附件和图片仅提供公开来源链接，不自动下载。"),
+	idsQuery("campus.contacts.list", "查询 IDS 教学服务联系机构", "campus", "directory", []string{"教学服务联系机构", "IDS通讯录", "教学楼管理单位"}, "读取 IDS 公布的教学服务联系机构及 org_id；使用 campus.contacts.details 查询该机构公开办公联系方式，不查询个人通讯录。"),
+	idsQuery("campus.contacts.details", "查询 IDS 机构办公联系方式", "campus", "directory", []string{"教学楼联系电话", "教学服务电话", "教学服务办公地点"}, "用 campus.contacts.list 返回的 org_id 读取源站公开办公联系方式；只投影公开办公信息，不扩展为个人资料查询。"),
+	idsQuery("life.lostfound.list", "查询 IDS 失物招领公告", "life", "convenience", []string{"失物招领", "寻物启事", "招领启事", "丢失物品"}, "按 kind 区分寻物和招领，分页查询 IDS 公告摘要及官方入口；不返回联系人隐私，不读取认领信息，不发布、认领或联系他人。"),
+	navigation("learning.classrooms.navigate", "定位 IDS 现场导览与教学服务", "learning", "schedule", "数字化教学服务平台 IDS", []string{"教学督导", "教学楼3D", "教学楼实时动态"}, []string{"IDS", "classroom", "supervision"}, []TaskPath{{"campus", "maps"}}),
+	navigation("life.lostfound.navigate", "定位失物招领详情入口", "life", "convenience", "数字化教学服务平台 IDS", []string{"失物详情", "失物招领详情"}, []string{"lost", "found"}, nil),
 	publicQuery("digital.software.list", "查询正版软件目录", "digital", "software", "正版软件中心", []string{"软件目录", "校园正版软件", "可用软件", "MATLAB", "Office", "Windows"}, "读取正版软件中心公开目录的软件名称、分类及官方详情入口；不下载、安装、激活或接受许可，不保证个人授权资格、最新版本及软件当前可用性。"),
 	publicQuery("library.borrowing.list", "查询学生借阅规则", "library", "borrowing", "图书馆", []string{"借阅规则", "借书期限", "续借次数", "预约规则", "续借条件"}, "读取图书馆新生指南与固定正式借阅规则，返回读者额度及普通借阅、短借、续借和预约的来源条件；保留出处和适用限制，不查询个人记录或办理预约续借。"),
 	publicQuery("life.health.list", "查询校医院公告", "life", "health", "校医院", []string{"校医院公告", "新生体检", "医保通知"}, "分页读取校医院通知公告归档的标题、日期、对象ID及链接；按 next_cursor 续页，以 life.health.get 按需读取正文。不提供诊疗建议或个人健康数据。"),
@@ -83,6 +99,12 @@ var catalog = []Capability{
 func idsQuery(id, title, category, group string, aliases []string, description string) Capability {
 	c := publicQuery(id, title, category, group, "数字化教学服务平台 IDS", aliases, description)
 	c.Provider = "ids"
+	if id == "campus.notices.list" || id == "campus.notices.get" {
+		c.CrossListings = []TaskPath{{"campus", "maps"}}
+	}
+	if id == "campus.contacts.list" || id == "campus.contacts.details" {
+		c.CrossListings = []TaskPath{{"learning", "schedule"}}
+	}
 	return c
 }
 

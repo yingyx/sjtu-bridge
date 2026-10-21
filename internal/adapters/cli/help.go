@@ -26,11 +26,11 @@ func addBusinessExample(command *cobra.Command, capability contracts.Capability)
 func completeCommandHelp(root *cobra.Command) {
 	resourceDescriptions := map[string]string{
 		"calendars": "校历索引", "notices": "公告索引与正文", "services": "校园网站目录", "classrooms": "教室目录、设施与单日排课",
-		"courses": "课程查询", "practice": "实践修业与达标", "semester": "学期信息", "timetable": "本人课表",
+		"courses": "课程查询", "practice": "实践修业与达标", "semester": "学期与上课节次", "timetable": "本人课表",
 		"borrowing": "借阅规则与条件", "loans": "个人借阅入口", "spaces": "图书馆空间入口", "dining": "食堂与用餐时段数据",
 		"health": "校医院公告", "lostfound": "失物招领", "sports": "体育场馆入口", "utilities": "宿舍生活入口", "electricity": "本人宿舍电量",
 		"activities": "校园活动", "network": "校园网络入口", "software": "正版软件目录与入口", "support": "网络支持信息", "mail": "本人收件箱标题",
-		"fees": "收费公示", "payments": "缴费入口", "buildings": "教学建筑目录", "contacts": "教学楼办公联系", "maps": "校园地图入口",
+		"fees": "收费公示", "payments": "缴费入口", "buildings": "教学建筑与楼层", "contacts": "教学楼办公联系", "maps": "校园地图入口",
 		"organizations": "学校机构目录", "computing": "科研计算入口", "hardware": "计算硬件信息", "assignments": "Canvas 作业与截止时间",
 		"serve": "通过标准输入输出提供 MCP 服务",
 	}

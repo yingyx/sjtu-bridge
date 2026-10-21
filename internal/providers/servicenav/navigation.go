@@ -13,7 +13,7 @@ import (
 	"github.com/yingyx/sjtu-bridge/contracts"
 )
 
-const revision = "2026-10-20-navigation-v5"
+const revision = "2026-10-21-navigation-v6"
 
 type Provider struct{}
 

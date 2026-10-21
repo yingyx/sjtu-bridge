@@ -47,14 +47,16 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		args []string
 		ids  []string
 	}{
-		{[]string{"list"}, []string{"administration.fees.get", "administration.fees.list", "administration.payments.navigate", "campus.buildings.list", "campus.maps.navigate", "campus.organizations.list", "development.activities.navigate", "development.notices.get", "development.notices.list", "digital.network.navigate", "digital.software.list", "digital.software.navigate", "digital.support.list", "learning.practice.navigate", "learning.semester.current", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.dining.series", "life.health.get", "life.health.list", "life.sports.navigate", "life.utilities.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
-		{[]string{"search", "校历"}, []string{"public.calendars.list", "learning.semester.current"}},
+		{[]string{"list"}, []string{"administration.fees.get", "administration.fees.list", "administration.payments.navigate", "campus.buildings.details", "campus.buildings.list", "campus.contacts.details", "campus.contacts.list", "campus.maps.navigate", "campus.notices.get", "campus.notices.list", "campus.organizations.list", "development.activities.navigate", "development.notices.get", "development.notices.list", "digital.network.navigate", "digital.software.list", "digital.software.navigate", "digital.support.list", "learning.classrooms.available", "learning.classrooms.details", "learning.classrooms.filters", "learning.classrooms.list", "learning.classrooms.navigate", "learning.classrooms.schedule", "learning.classrooms.types", "learning.courses.search", "learning.practice.navigate", "learning.semester.current", "learning.semester.periods", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.dining.series", "life.health.get", "life.health.list", "life.lostfound.list", "life.lostfound.navigate", "life.sports.navigate", "life.utilities.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
+		{[]string{"search", "校历"}, []string{"public.calendars.list", "campus.contacts.details", "campus.contacts.list", "learning.classrooms.available", "learning.classrooms.details", "learning.classrooms.filters", "learning.classrooms.list", "learning.classrooms.navigate", "learning.classrooms.schedule", "learning.classrooms.types", "learning.courses.search", "learning.semester.current", "learning.semester.periods"}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list", "public.notices.search"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},
 		{[]string{"search", "作业"}, []string{}},
 		{[]string{"search", "宿舍洗浴"}, []string{"life.utilities.navigate"}},
 		{[]string{"search", "软件目录"}, []string{"digital.software.list"}},
 		{[]string{"search", "当前学期"}, []string{"learning.semester.current"}},
+		{[]string{"search", "空闲教室"}, []string{"learning.classrooms.available"}},
+		{[]string{"search", "失物招领"}, []string{"life.lostfound.list", "life.lostfound.navigate"}},
 		{[]string{"list", "--category", "development", "--task-group", "activities"}, []string{"development.activities.navigate", "development.notices.get", "development.notices.list", "learning.practice.navigate"}},
 		{[]string{"search", "二课", "--category", "learning", "--task-group", "practice"}, []string{"development.activities.navigate", "learning.practice.navigate"}},
 		{[]string{"list", "--category", "research", "--task-group", "activities"}, []string{}},
@@ -90,22 +92,22 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 
 func TestDiscoveryUsesTaskSummariesAndActionableDescriptions(t *testing.T) {
 	for _, args := range [][]string{
-		{"capabilities", "search", "食堂曲线"},
-		{"capabilities", "search", "食堂曲线", "--json"},
+		{"capabilities", "search", "空闲教室"},
+		{"capabilities", "search", "空闲教室", "--json"},
 	} {
 		var out, diag bytes.Buffer
 		if Execute(context.Background(), args, &out, &diag, strings.NewReader("")) != 0 {
 			t.Fatal(diag.String())
 		}
-		if !strings.Contains(out.String(), "sjtu life dining series") || strings.Contains(out.String(), "execution_rule") || strings.Contains(out.String(), "reversibility") || strings.Contains(out.String(), "不提供轮询") {
+		if !strings.Contains(out.String(), "sjtu learning classrooms available") || strings.Contains(out.String(), "execution_rule") || strings.Contains(out.String(), "reversibility") || strings.Contains(out.String(), "不提供轮询") {
 			t.Fatal("default discovery is not concise", out.String())
 		}
 	}
 	var out, diag bytes.Buffer
-	if Execute(context.Background(), []string{"capabilities", "describe", "life.dining.series"}, &out, &diag, strings.NewReader("")) != 0 {
+	if Execute(context.Background(), []string{"capabilities", "describe", "learning.classrooms.available"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
-	for _, wanted := range []string{"--canteen-id", "--day", "必填", "today", "sjtu life dining series"} {
+	for _, wanted := range []string{"--building-id", "--date", "--start-section", "--end-section", "必填", "YYYY-MM-DD", "sjtu learning classrooms available"} {
 		if !strings.Contains(out.String(), wanted) {
 			t.Fatalf("missing %s: %s", wanted, out.String())
 		}
@@ -115,11 +117,11 @@ func TestDiscoveryUsesTaskSummariesAndActionableDescriptions(t *testing.T) {
 	}
 	out.Reset()
 	diag.Reset()
-	if Execute(context.Background(), []string{"capabilities", "describe", "life.dining.areas", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+	if Execute(context.Background(), []string{"capabilities", "describe", "learning.classrooms.list", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
 	var usage capabilityUsage
-	if json.Unmarshal(out.Bytes(), &usage) != nil || len(usage.InputSchema) == 0 || usage.CLIFlags["canteen_id"] != "--canteen-id" || usage.Example == "" {
+	if json.Unmarshal(out.Bytes(), &usage) != nil || len(usage.InputSchema) == 0 || usage.CLIFlags["building_id"] != "--building-id" || usage.Example == "" {
 		t.Fatal("incomplete JSON call guide", out.String())
 	}
 	if strings.Contains(out.String(), "output_schema") || strings.Contains(out.String(), "execution_rule") {

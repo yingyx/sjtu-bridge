@@ -12,6 +12,7 @@ var categoryLabels = map[string]string{
 var taskGroupLabels = map[TaskPath]string{
 	{"digital", "software"}:        "软件与生产力工具",
 	{"life", "utilities"}:          "住宿与生活设施",
+	{"life", "convenience"}:        "日常便民服务",
 	{"digital", "communication"}:   "通信与协作",
 	{"life", "dining"}:             "餐饮与校园支付",
 	{"library", "borrowing"}:       "借阅与续借",

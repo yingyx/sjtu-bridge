@@ -18,6 +18,7 @@ func TestActionableErrorsInTextAndJSON(t *testing.T) {
 	}{
 		{[]string{"capabilites"}, []string{"capabilities", "--help"}},
 		{[]string{"canvas", "assignmnts"}, []string{"assignments", "--help"}},
+		{[]string{"learning", "classroms"}, []string{"classrooms", "--help"}},
 		{[]string{"canvas", "courses", "list"}, []string{"--help"}},
 		{[]string{"completion", "wrong"}, []string{"--help"}},
 		{[]string{"help", "wrong"}, []string{"帮助主题", "--help"}},
@@ -27,6 +28,8 @@ func TestActionableErrorsInTextAndJSON(t *testing.T) {
 		{[]string{"public", "calendars", "list", "--limit"}, []string{"limit", "缺少值"}},
 		{[]string{"auth", "remove"}, []string{"credential", "必填"}},
 		{[]string{"public", "calendars", "list", "--limit", "101"}, []string{"limit", "1–100"}},
+		{[]string{"learning", "classrooms", "available"}, []string{"building_id", "date", "start_section", "end_section"}},
+		{[]string{"learning", "classrooms", "list", "--room-features", "[]"}, []string{"room-features", "json"}},
 		{[]string{"learning", "timetable", "list"}, []string{"--connection"}},
 	} {
 		for _, asJSON := range []bool{false, true} {

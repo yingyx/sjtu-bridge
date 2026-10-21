@@ -81,6 +81,8 @@ func TestExplicitZeroAndEmptyFlagsCannotBecomeDefaults(t *testing.T) {
 	}{
 		{"public.calendars.list", "limit", []string{"--limit", "0"}},
 		{"life.dining.series", "day", []string{"--canteen-id", "100", "--day="}},
+		{"life.lostfound.list", "kind", []string{"--kind="}},
+		{"learning.classrooms.available", "start_section", []string{"--building-id", "24", "--date", "2026-10-21", "--start-section", "0", "--end-section", "2"}},
 	} {
 		_, err := readPublicTestInput(t, test.id, test.flags, nil)
 		var issue *cliError
@@ -88,7 +90,11 @@ func TestExplicitZeroAndEmptyFlagsCannotBecomeDefaults(t *testing.T) {
 			t.Fatal(test.flags, err)
 		}
 	}
-
+	// An explicit empty facility object remains a valid no-filter value.
+	raw, err := readPublicTestInput(t, "learning.classrooms.list", []string{"--building-id", "24", "--room-features", `{}`}, nil)
+	if err != nil || !bytes.Contains(raw, []byte(`"room_features":{}`)) {
+		t.Fatal(string(raw), err)
+	}
 }
 
 type unreadableInput struct{}
@@ -103,9 +109,12 @@ func TestJSONInputValidationIsDetailedWithoutEchoingValues(t *testing.T) {
 	}{
 		{"limit", "public.calendars.list", `{"limit":101}`, "limit", "1–100"},
 		{"limit_type", "public.calendars.list", `{"limit":"SYNTHETIC_SECRET"}`, "limit", "整数"},
-		{"required", "life.dining.areas", `{}`, "canteen_id", "--canteen-id"},
-		{"enum", "life.dining.series", `{"canteen_id":"100","day":"SYNTHETIC_SECRET"}`, "day", "today"},
+		{"required_dining", "life.dining.areas", `{}`, "canteen_id", "--canteen-id"},
+		{"enum_dining", "life.dining.series", `{"canteen_id":"100","day":"SYNTHETIC_SECRET"}`, "day", "today"},
+		{"required", "learning.classrooms.available", `{}`, "building_id", "--building-id"},
+		{"enum", "life.lostfound.list", `{"kind":"SYNTHETIC_SECRET"}`, "kind", "looking_for_item"},
 		{"unknown_key", "public.calendars.list", `{"SYNTHETIC_SECRET":true}`, "", "不支持的字段"},
+		{"nested_unknown_key", "learning.classrooms.list", `{"building_id":"24","room_features":{"SYNTHETIC_SECRET":["1"]}}`, "room_features", "内部字段"},
 		{"duplicate", "public.calendars.list", `{"limit":1,"LIMIT":"SYNTHETIC_SECRET"}`, "", "重复字段"},
 		{"documents", "public.calendars.list", `{} {"SYNTHETIC_SECRET":1}`, "", "多个文档"},
 		{"syntax", "public.calendars.list", `{"limit":"SYNTHETIC_SECRET"`, "", "JSON 输入无效"},

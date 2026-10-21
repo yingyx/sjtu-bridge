@@ -24,10 +24,21 @@ func entry(id, title, url, purpose, kind string, operation contracts.Operation, 
 	if id == "loans" || id == "activities" || id == "registration" || id == "electric" || id == "bath" || id == "software" || id == "license" || id == "ids" {
 		verifiedAt = "2026-10-20"
 	}
+	if id == "ids" || id == "ids-3d" || id == "ids-dynamic" || id == "ids-supervision" || id == "ids-lostfound" {
+		verifiedAt = "2026-10-21"
+	}
 	return contracts.Item{Provider: "servicenav", SourceID: id, Title: title, URL: url, Navigation: &contracts.Navigation{Purpose: purpose, Primary: primary, CrossListings: cross, DestinationKind: kind, RelatedCapabilities: related, Sources: []contracts.NavigationSource{{Title: "官方入口依据", URL: source}}, VerifiedAt: verifiedAt, Upstream: contracts.Handoff{Status: "link_only", ReasonCode: reasonCode, Reason: reason, Authentication: authentication, Operation: operation, Effects: effects, Reversibility: reversibility, ExecutionRule: contracts.ManualExecution}}}
 }
 
 var entries = map[string][]contracts.Item{
+	"learning.classrooms.navigate": {
+		entry("ids-3d", "打开 IDS 教学楼 3D 导览", "https://ids.sjtu.edu.cn/", "从 IDS 当前教学楼栏目进入 3D 导览；已接入的建筑与教室设施数据可先按相关能力查询。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "interactive_view_not_supported", "3D 页面依赖官网生成的加密参数与交互界面，Bridge 只定位官网入口，不生成裸深链或运行 3D 场景。", "以官网当前要求为准", "https://ids.sjtu.edu.cn/", []string{"campus.buildings.list", "campus.buildings.details", "learning.classrooms.details"}, "learning.classrooms.navigate"),
+		entry("ids-dynamic", "打开 IDS 教学楼实时动态", "https://ids.sjtu.edu.cn/", "在 IDS 选择教学楼后进入官网实时动态栏目；源课表查询与实时现场状态分别提供。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "authenticated_realtime_not_supported", "实时动态需要官网身份和动态页面参数，Bridge 不读取实时画面、人员状态或监控数据。", "在官网按要求实名认证", "https://ids.sjtu.edu.cn/", []string{"learning.classrooms.schedule", "learning.classrooms.available"}, "learning.classrooms.navigate"),
+		entry("ids-supervision", "定位 IDS 教学督导栏目", "https://ids.sjtu.edu.cn/", "由 IDS 当前官网进入教学督导栏目，由官网判断角色与可用功能。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "role_bound_service_not_supported", "督导角色、业务字段和操作契约未接入；不从普通查询权限继承督导权限或执行提交。", "以官网角色和认证要求为准", "https://ids.sjtu.edu.cn/", []string{"campus.contacts.list"}, "learning.classrooms.navigate"),
+	},
+	"life.lostfound.navigate": {
+		entry("ids-lostfound", "打开 IDS 失物招领详情", "https://ids.sjtu.edu.cn/", "在 IDS 失物招领栏目按公告摘要查找详情；先用 life.lostfound.list 区分寻物与招领。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "private_contact_detail_not_supported", "详情可能包含个人联系方式或认领信息，Bridge 仅提供公开摘要；登记、认领动作尚未核实，若官网提供则由用户人工办理。", "以官网详情页当前要求为准", "https://ids.sjtu.edu.cn/", []string{"life.lostfound.list"}, "life.lostfound.navigate"),
+	},
 	"library.loans.navigate": {
 		entry("loans", "查看我的借阅与到期时间", "https://86sjt-primo.hosted.exlibrisgroup.com.cn/primo-explore/account?vid=book&section=loans", "直达学校图书馆链接的个人借阅页；借阅规则可单独查询，不代表个人借阅状态。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "secure_authentication_unavailable", "2026-10-20 匿名核对的 Primo/PDS 登录链指向 HTTP 账号入口，其 HTTPS 连接被拒绝；Bridge 未接通符合 TLS 要求的认证链，不返回借阅数据。", "按图书馆官网要求在浏览器认证", "https://www.lib.sjtu.edu.cn/", []string{"library.borrowing.list"}, "library.loans.navigate"),
 	},
@@ -68,7 +79,7 @@ var entries = map[string][]contracts.Item{
 		entry("wireless", "定位校园无线网支持", "https://net.sjtu.edu.cn/xxfw/wxwl.htm", "校园无线网由网络信息中心服务；宿舍网络联系方式可直接查询 NIMO。", "official_documentation", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "interface_unverified", "无线网个人状态及报修接口未接入。", "公开说明无需登录；报修以官网为准", "https://net.sjtu.edu.cn/xxfw/wxwl.htm", []string{"digital.support.list"}, "digital.network.navigate"),
 	},
 	"campus.maps.navigate": {
-		entry("ids", "查询教学建筑与当前学期", "https://ids.sjtu.edu.cn/", "IDS 已接入教学建筑目录与当前学期；与电子地图路线、教室占用和借用区分。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "remaining_interfaces_unverified", "教室课表、空闲或占用接口尚未接入；预约、借用与报修均由官网人工办理。", "已接入目录无需登录；业务以官网为准", "https://ids.sjtu.edu.cn/", []string{"campus.buildings.list", "learning.semester.current"}, "campus.maps.navigate"),
+		entry("ids", "查询 IDS 教学建筑与教室服务", "https://ids.sjtu.edu.cn/", "教学建筑目录和设施主归地图，教室目录、单日课表与未排课查询主归学习；使用相关能力直接读取。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "interactive_views_not_supported", "地图数据不表示开放或借用资格；3D、实名实时动态与督导由官网栏目提供，不执行现场监控或业务提交。", "已接入公开查询无需登录；其他栏目以官网为准", "https://ids.sjtu.edu.cn/", []string{"campus.buildings.list", "campus.buildings.details", "learning.semester.current", "learning.semester.periods", "learning.classrooms.list", "learning.classrooms.schedule", "learning.classrooms.available", "learning.classrooms.navigate"}, "campus.maps.navigate"),
 		entry("map", "定位校园电子地图", "https://map.sjtu.edu.cn/", "地图查楼与地点搜索的官方目的地，由学校学生入口链接确认。", "application", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "interface_unverified", "地图数据接口与路线能力未验证。", "以地图系统要求为准", "https://www.sjtu.edu.cn/xs/", []string{"campus.organizations.list"}, "campus.maps.navigate"),
 		entry("accessibility", "定位目的地管理单位", "https://www.sjtu.edu.cn/jgsz/index.html", "无障碍可达性或临时通行问题需向目的地管理单位核实，可先查机构目录。", "official_directory", contracts.Read, []contracts.Effect{contracts.NoEffect}, contracts.NotApplicable, "data_unavailable", "尚无已验证的无障碍路线、施工或电梯状态数据源。", "公开机构目录无需登录", "https://www.sjtu.edu.cn/xs/", []string{"campus.organizations.list"}, "campus.maps.navigate"),
 	},
