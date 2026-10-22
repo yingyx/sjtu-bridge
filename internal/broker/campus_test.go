@@ -126,7 +126,8 @@ func TestCampusCapabilityRegistrationAndProjection(t *testing.T) {
 			if _, e = invoke(h.b, h.a, query("summary_v1", "1")); e == nil {
 				t.Fatal("replaced Canvas grant remained active")
 			}
-			if id != contracts.MailCapability {
+			rules, _ := contracts.CampusRules(id)
+			if !rules.QueryAllowed {
 				q.Query = "unsupported"
 				if _, e = invokeCampusTest(h.b, h.a, id, q); e == nil || f.calls.Load() != 1 {
 					t.Fatal("unsupported query reached provider")

@@ -11,20 +11,29 @@ func ExecutableRead(c contracts.Capability) bool {
 	}
 	switch c.DataClass {
 	case contracts.PersonalData:
-		if c.ID == contracts.TimetableCapability || c.ID == contracts.MailCapability || c.ID == contracts.ActivityCapability || c.ID == contracts.ElectricityBalanceCapability {
-			provider := "teaching"
-			if c.ID == contracts.MailCapability {
-				provider = "sjtumail"
-			}
-			if c.ID == contracts.ActivityCapability {
-				provider = "activity"
-			}
-			if c.ID == contracts.ElectricityBalanceCapability {
-				provider = "electric"
-			}
+		provider := ""
+		switch c.ID {
+		case contracts.TimetableCapability:
+			provider = "teaching"
+		case contracts.MailCapability:
+			provider = "sjtumail"
+		case contracts.ActivityCapability, contracts.ActivityTypesCapability, contracts.ActivityCalendarCapability, contracts.ActivityCountsCapability, contracts.ActivityRegistrationsCapability, contracts.ActivityCollectionsCapability:
+			provider = "activity"
+		case contracts.SecondClassHonorsCapability, contracts.SecondClassPracticeCapability, contracts.SecondClassEducationCapability:
+			provider = "dekt"
+		case contracts.ElectricityBalanceCapability, contracts.ElectricityHistoryCapability:
+			provider = "electric"
+		case contracts.BathBindingCapability, contracts.BathDevicesCapability, contracts.BathUsageCapability:
+			provider = "bath"
+		}
+		if provider != "" {
 			return c.Provider == provider && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "JAAuthCookie"
 		}
-		return c.ID == contracts.AssignmentsCapability && c.Provider == "canvas" &&
+		if contracts.JCourseOperation(c.ID) != "" {
+			return c.Provider == "jcourse" && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "JCourseAPIKey"
+		}
+		_, canvasRead := contracts.CanvasRules(c.ID)
+		return (c.ID == contracts.AssignmentsCapability || canvasRead) && c.Provider == "canvas" &&
 			c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery &&
 			len(c.Credentials) == 1 && c.Credentials[0] == "CanvasToken"
 	case contracts.PublicData:

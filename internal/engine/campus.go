@@ -28,10 +28,18 @@ func parseCampus(id string, raw []byte) (contracts.CampusQuery, error) {
 	if !known || len(raw) > contracts.MaxJSONBytes || json.Unmarshal(raw, &fields) != nil || fields == nil {
 		return q, contracts.Fail("INVALID_ARGUMENT", "Expected a campus query object")
 	}
-	for key, value := range fields {
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || (key == "query" && !rules.QueryAllowed) {
+	// Reading each key independently rejects duplicate top-level parameters.
+	keys := json.NewDecoder(bytes.NewReader(raw))
+	_, _ = keys.Token()
+	seenKeys := map[string]bool{}
+	for keys.More() {
+		token, e := keys.Token()
+		key, ok := token.(string)
+		var value json.RawMessage
+		if e != nil || !ok || seenKeys[key] || keys.Decode(&value) != nil || !rules.AllowsInputField(key) || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return q, contracts.Fail("INVALID_ARGUMENT", "Unsupported campus query field or null value")
 		}
+		seenKeys[key] = true
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
@@ -57,7 +65,7 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	if e != nil {
 		return e
 	}
-	request.bind(lease, scope, q.Query)
+	request.bind(lease, scope, campusFilterKey(q))
 	next, e := request.continuation(q.Cursor)
 	if e != nil {
 		return e
@@ -75,11 +83,15 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 		return err
 	}
 	rules, _ := contracts.CampusRules(inv.Capability)
-	if page.AccountRef != scope.AccountRef || len(page.Rows) > q.Limit || len(page.Next) > 8192 || page.Coverage != rules.Coverage {
+	if page.AccountRef != scope.AccountRef || len(page.Rows) > q.Limit || len(page.Next) > 8192 || page.Coverage != rules.Coverage || (!rules.Paginated && page.Next != "") {
 		return contracts.Fail("UPSTREAM_CHANGED", "Campus result exceeded the authorized scope")
 	}
 	if inv.Capability == contracts.ElectricityBalanceCapability && (len(page.Rows) != 1 || page.Next != "") {
 		return contracts.Fail("UPSTREAM_CHANGED", "Electricity balance must include exactly the bound room")
+	}
+	unavailable, e := campusUnavailableModules(inv.Capability, page.UnavailableModules)
+	if e != nil {
+		return e
 	}
 	rows := []contracts.CampusRecord{}
 	seen := map[string]bool{}
@@ -88,6 +100,11 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 			return contracts.Fail("UPSTREAM_CHANGED", "Invalid campus resource")
 		}
 		seen[r.Ref] = true
+		for _, module := range unavailable {
+			if r.Module == module {
+				return contracts.Fail("UPSTREAM_CHANGED", "Unavailable second-class module returned records")
+			}
+		}
 		for _, v := range []string{r.Ref, r.Title, r.CourseCode, r.Location, r.Campus, r.Weekday, r.Periods, r.Weeks, r.Sender, r.SentAt, r.RemainingKWh, r.SubsidyKWh} {
 			if !utf8.ValidString(v) || len(v) > 2048 || strings.ContainsAny(v, "\x00\r\n") {
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid campus record field")
@@ -113,22 +130,35 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid message date")
 			}
 			row.Sender, row.SentAt = r.Sender, r.SentAt
-		} else if inv.Capability == contracts.ActivityCapability {
-			if !activityRecordRef.MatchString(r.Ref) || r.Title == "" || len(r.ActivityTime) != 2 || r.ActivityTime[0] == "" || r.ActivityTime[1] == "" {
-				return contracts.Fail("UPSTREAM_CHANGED", "Invalid activity summary")
+		} else if contracts.IsActivityCapability(inv.Capability) {
+			row, e = projectActivityRecord(inv.Capability, q, r)
+			if e != nil {
+				return e
 			}
-			row.Location, row.ActivityTime = r.Location, append([]string(nil), r.ActivityTime...)
+		} else if contracts.IsSecondClassCapability(inv.Capability) {
+			row, e = projectSecondClassRecord(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
 		} else if inv.Capability == contracts.ElectricityBalanceCapability {
 			if r.Ref != "electric:balance:"+strings.TrimPrefix(q.ResourceRef, "electric:room:") || r.Title == "" || len(r.RemainingKWh) > 64 || len(r.SubsidyKWh) > 64 || !electricAmount.MatchString(r.RemainingKWh) || !electricAmount.MatchString(r.SubsidyKWh) {
 				return contracts.Fail("UPSTREAM_CHANGED", "Invalid bound-room electricity balance")
 			}
 			row.RemainingKWh, row.SubsidyKWh = r.RemainingKWh, r.SubsidyKWh
+		} else if contracts.JCourseOperation(inv.Capability) != "" {
+			row, e = projectCommunity(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
 		} else {
-			return contracts.Fail("PERMISSION_DENIED", "Unsupported campus view")
+			row, e = projectUtility(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
 		}
 		rows = append(rows, row)
 	}
-	result := contracts.CampusResponse{SchemaVersion: "1", RequestID: id, Data: contracts.CampusData{Items: rows}, Meta: contracts.PageMeta{Provider: metadata.Provider, Coverage: page.Coverage, FetchedAt: time.Now().UTC()}}
+	result := contracts.CampusResponse{SchemaVersion: "1", RequestID: id, Data: contracts.CampusData{Items: rows}, Meta: contracts.PageMeta{Provider: metadata.Provider, Coverage: page.Coverage, FetchedAt: time.Now().UTC(), UnavailableModules: unavailable}}
 	if e = request.stageCursor(page.Next, &result.Meta); e != nil {
 		return e
 	}
@@ -147,4 +177,12 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 		return contracts.Fail("UPSTREAM_CHANGED", "Campus output does not match its fixed view")
 	}
 	return request.publish(ctx, token, raw, send)
+}
+
+func campusFilterKey(q contracts.CampusQuery) string {
+	q.Cursor = ""
+	// The bounded query contains only JSON-supported values. Keeping all fields
+	// here makes every new filter part of continuation identity by default.
+	raw, _ := json.Marshal(q)
+	return string(raw)
 }

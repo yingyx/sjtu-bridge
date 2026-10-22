@@ -1,21 +1,20 @@
-// Package activity reads visible campus activity summaries. Registration,
-// check-in, collection, subscriptions, detail counters and capacity monitoring
-// are deliberately absent from its endpoint allowlist.
+// Package activity reads visible campus activities and the bound account's
+// own registration and collection summaries. Business writes, activity details,
+// participant directories and quota monitoring are absent from its allowlist.
 package activity
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
-	"github.com/yingyx/sjtu-bridge/internal/domain"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sso"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
@@ -39,11 +38,12 @@ func New() (*Service, func()) {
 	return &Service{Portal: p, Auth: a}, func() { p.Close(); a.Close() }
 }
 
+// Allowed admits only reviewed first-party read routes and the fixed login exchange.
 func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) {
 		return false
 	}
-	q, ok := sso.Values(u, 3)
+	q, ok := sso.Values(u, 24)
 	if !ok {
 		return false
 	}
@@ -52,124 +52,91 @@ func Allowed(u *url.URL) bool {
 		return len(q) == 0
 	case "/api/v1/login/token":
 		return len(q) == 1 && q.Get("code") != ""
-	case "/api/v1/activity/list/home":
+	case "/api/v1/system/activity_type":
+		return len(q) == 1 && q.Get("isAll") == "true"
+	case "/api/v1/activity/calendar/count":
+		if !monthOK(q.Get("time")) {
+			return false
+		}
+		return only(q, "time", "activity_type_id") && numericID(q.Get("activity_type_id"))
+	case "/api/v1/activity/list/home", "/api/v1/activity/list/calendar", "/api/v1/signUp/activity/list", "/api/v1/collect/activity/list":
 		page, e := strconv.Atoi(q.Get("page"))
 		size, se := strconv.Atoi(q.Get("per_page"))
-		return len(q) == 3 && e == nil && se == nil && page >= 1 && page <= maxPage && size >= 1 && size <= 20 && q.Get("time_sort") == "desc"
+		if e != nil || se != nil || page < 1 || page > maxPage || size < 1 || size > 20 {
+			return false
+		}
+		switch u.Path {
+		case "/api/v1/activity/list/home":
+			keys := []string{"page", "per_page", "time_sort", "activity_type_id", "query"}
+			for i := 0; i < 8; i++ {
+				keys = append(keys, fmt.Sprintf("activity_child_type_id[%d]", i))
+			}
+			for i := 0; i < 4; i++ {
+				keys = append(keys, fmt.Sprintf("status[%d]", i))
+			}
+			return only(q, keys...) && q.Get("time_sort") == "desc" && optionalID(q, "activity_type_id") && optionalQuery(q) && indexed(q, "activity_child_type_id", 8, nil) && indexed(q, "status", 4, feedStates)
+		case "/api/v1/activity/list/calendar":
+			return only(q, "page", "per_page", "activity_type_id", "date") && dateOK(q.Get("date")) && numericID(q.Get("activity_type_id"))
+		case "/api/v1/signUp/activity/list":
+			return only(q, "page", "per_page", "status", "query") && optionalQuery(q) && (q.Get("status") == "" && !q.Has("status") || registrationStates[q.Get("status")])
+		case "/api/v1/collect/activity/list":
+			return only(q, "page", "per_page")
+		}
 	}
 	return false
 }
 
-func safeText(s string) bool {
-	return utf8.ValidString(s) && len(s) <= 2048 && !strings.ContainsAny(s, "\x00\r\n")
-}
+var feedStates = map[string]bool{"1": true, "2": true, "3": true, "4": true}
+var registrationStates = map[string]bool{"applied": true, "accepted": true, "not_accepted": true, "participated": true, "not_participated": true, "cancelled": true}
 
-func (s *Service) list(ctx context.Context, h http.Header, page, limit int) ([]contracts.CampusRecord, int, error) {
-	q := url.Values{"page": {strconv.Itoa(page)}, "per_page": {strconv.Itoa(limit)}, "time_sort": {"desc"}}
-	r, e := get(ctx, s.Portal, api+"/activity/list/home?"+q.Encode(), h)
-	if e != nil {
-		return nil, 0, e
-	}
-	v, e := decode(r)
-	if e != nil {
-		return nil, 0, e
-	}
-	var rows []struct {
-		ID           json.RawMessage `json:"id"`
-		Name         string          `json:"name"`
-		Address      string          `json:"address"`
-		ActivityTime []string        `json:"activity_time"`
-		Public       int             `json:"public"`
-	}
-	fail := func() ([]contracts.CampusRecord, int, error) {
-		return nil, 0, contracts.Fail("UPSTREAM_CHANGED", "Activity list structure or pagination changed")
-	}
-	if v.Total == nil || *v.Total < 0 || *v.Total > maxPage*limit || json.Unmarshal(v.Data, &rows) != nil || rows == nil || len(rows) > limit || len(rows) != min(limit, max(0, *v.Total-(page-1)*limit)) {
-		return fail()
-	}
-	out := []contracts.CampusRecord{}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		id, e := scalarID(row.ID)
-		if e != nil || seen[id] || row.Name == "" || !safeText(row.Name) || (row.Public != 2 && row.Public != 3) || len(row.ActivityTime) != 2 {
-			return fail()
-		}
-		seen[id] = true
-		for _, s := range append(row.ActivityTime, row.Address) {
-			if !safeText(s) {
-				return fail()
+func only(q url.Values, keys ...string) bool {
+	for k := range q {
+		found := false
+		for _, a := range keys {
+			if a == k {
+				found = true
 			}
 		}
-		if row.ActivityTime[0] == "" || row.ActivityTime[1] == "" {
-			return fail()
+		if !found {
+			return false
 		}
-		record := contracts.CampusRecord{ResourceRef: Resource, Ref: "activity:event:" + id, Title: row.Name, ActivityTime: append([]string(nil), row.ActivityTime...)}
-		if row.Public == 2 {
-			record.Location = row.Address
-		}
-		out = append(out, record)
 	}
-	return out, *v.Total, nil
+	return true
+}
+func numericID(s string) bool {
+	return len(s) > 0 && len(s) <= 20 && s[0] >= '1' && s[0] <= '9' && strings.Trim(s, "0123456789") == ""
+}
+func optionalID(q url.Values, k string) bool { return !q.Has(k) || numericID(q.Get(k)) }
+func queryOK(s string) bool {
+	return utf8.ValidString(s) && utf8.RuneCountInString(s) <= 128 && strings.TrimSpace(s) != "" && !strings.ContainsFunc(s, unicode.IsControl)
+}
+func optionalQuery(q url.Values) bool { return !q.Has("query") || queryOK(q.Get("query")) }
+func indexed(q url.Values, key string, max int, values map[string]bool) bool {
+	seen := map[string]bool{}
+	gap := false
+	for i := 0; i < max; i++ {
+		k := fmt.Sprintf("%s[%d]", key, i)
+		if !q.Has(k) {
+			gap = true
+			continue
+		}
+		v := q.Get(k)
+		if gap || seen[v] || values != nil && !values[v] || values == nil && !numericID(v) {
+			return false
+		}
+		seen[v] = true
+	}
+	return true
+}
+func dateOK(s string) bool {
+	t, e := time.Parse("2006-01-02", s)
+	return e == nil && t.Year() >= 1900 && t.Year() <= 2200 && t.Format("2006-01-02") == s
+}
+func monthOK(s string) bool {
+	t, e := time.Parse("2006-01", s)
+	return e == nil && t.Year() >= 1900 && t.Year() <= 2200 && t.Format("2006-01") == s
 }
 
-func snapshot(rows []contracts.CampusRecord, total int) string {
-	b, _ := json.Marshal(struct {
-		Rows  []contracts.CampusRecord
-		Total int
-	}{rows, total})
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
-// Read returns one bounded page. Continuations recheck the first-page anchor;
-// the upstream provides no transactional snapshot across later pages.
-func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
-	rules, _ := contracts.CampusRules(contracts.ActivityCapability)
-	if q.AccountRef != account || !strings.HasPrefix(account, "activity:user:") || !rules.ValidQuery(q) || len(next) > 128 {
-		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Expected an own-account fixed activity feed query")
-	}
-	pageNumber, expected := 1, ""
-	if next != "" {
-		parts := strings.Split(next, ":")
-		var e error
-		if len(parts) != 2 {
-			return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Invalid activity continuation")
-		}
-		pageNumber, e = strconv.Atoi(parts[0])
-		if e != nil || pageNumber < 2 || pageNumber > maxPage || len(parts[1]) != 64 {
-			return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Invalid activity continuation")
-		}
-		expected = parts[1]
-	}
-	h, actual, e := s.login(ctx, secret)
-	if e != nil {
-		return domain.CampusPage{}, e
-	}
-	if actual != account {
-		return domain.CampusPage{}, contracts.Fail("PERMISSION_DENIED", "Activity account changed")
-	}
-	first, total, e := s.list(ctx, h, 1, q.Limit)
-	if e != nil {
-		return domain.CampusPage{}, e
-	}
-	digest := snapshot(first, total)
-	rows := first
-	if next != "" {
-		if expected != digest || (pageNumber-1)*q.Limit >= total {
-			return domain.CampusPage{}, contracts.Fail("UPSTREAM_CHANGED", "Activity list changed; restart the query")
-		}
-		var currentTotal int
-		rows, currentTotal, e = s.list(ctx, h, pageNumber, q.Limit)
-		if e != nil {
-			return domain.CampusPage{}, e
-		}
-		if total != currentTotal {
-			return domain.CampusPage{}, contracts.Fail("UPSTREAM_CHANGED", "Activity list changed; restart the query")
-		}
-	}
-	page := domain.CampusPage{AccountRef: actual, Rows: rows, Coverage: "visible_activity_summaries_only"}
-	if pageNumber*q.Limit < total {
-		page.Next = strconv.Itoa(pageNumber+1) + ":" + digest
-	}
-	return page, nil
+func safeText(s string) bool {
+	return utf8.ValidString(s) && len(s) <= 2048 && !strings.ContainsAny(s, "\x00\r\n")
 }

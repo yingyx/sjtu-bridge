@@ -133,7 +133,9 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 			return nil, contracts.Fail("UNSUPPORTED", "Credential provider is not ready")
 		}
 		normalizer, kind := "canvas", "CanvasToken"
-		if q.Provider != "canvas" {
+		if q.Provider == "jcourse" {
+			normalizer, kind = "jcourse", "JCourseAPIKey"
+		} else if q.Provider != "canvas" {
 			normalizer, kind = "jaccount", "JAAuthCookie"
 		}
 		var secret []byte
@@ -141,13 +143,13 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		source := storage.Credential{}
 		if q.SourceCredentialID != "" {
 			source = s.Credentials[q.SourceCredentialID]
-			if len(q.Secret) != 0 || !source.Active || source.Kind != "JAAuthCookie" || source.Provider == q.Provider || q.Provider == "canvas" || b.Engine.CampusProviders[source.Provider] == nil {
+			if len(q.Secret) != 0 || !source.Active || source.Kind != "JAAuthCookie" || source.Provider == q.Provider || (q.Provider == "canvas" || q.Provider == "jcourse") || b.Engine.CampusProviders[source.Provider] == nil {
 				return nil, contracts.Fail("PERMISSION_DENIED", "Active credential from another supported campus portal required")
 			}
 			if e = b.Store.CheckSourceCredential(source); e != nil {
 				return nil, e
 			}
-		} else if q.Provider == "canvas" {
+		} else if q.Provider == "canvas" || q.Provider == "jcourse" {
 			secret, e = auth.Normalize(normalizer, q.Secret)
 		} else {
 			secret, e = auth.NormalizeCampusCredential(q.Secret)
@@ -324,7 +326,8 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		}
 		return map[string]any{"client_id": a.ID, "connection_file": q.Path, "expires": a.Expires}, nil
 	case "grant":
-		if q.Capability != "" && q.Capability != contracts.AssignmentsCapability {
+		canvasRules, canvasRead := contracts.CanvasRules(q.Capability)
+		if q.Capability != "" && q.Capability != contracts.AssignmentsCapability && !canvasRead {
 			return b.grantCampus(ctx, q, s)
 		}
 		if len(q.Resources) != 0 {
@@ -335,7 +338,11 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		if !a.Active || !time.Now().Before(a.Expires) || !c.Active || c.Provider != "canvas" || q.AccountRef != c.AccountRef {
 			return nil, contracts.Fail("PERMISSION_DENIED", "Active app and matching credential required")
 		}
-		if (q.View != "summary_v1" && q.View != "deadlines_v1") || q.Limit < 1 || q.Limit > 100 || len(q.Courses) < 1 || len(q.Courses) > 100 {
+		validView := q.View == "summary_v1" || q.View == "deadlines_v1"
+		if canvasRead {
+			validView = canvasRules.ValidGrant(q.View, q.Limit, q.Courses)
+		}
+		if !validView || q.Limit < 1 || q.Limit > 100 || len(q.Courses) < 1 || len(q.Courses) > 100 {
 			return nil, contracts.Fail("INVALID_ARGUMENT", "Choose courses, a fixed view and limit 1-100")
 		}
 		// Verify selectable courses rather than trusting owner-supplied identifiers.
@@ -363,6 +370,9 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		}
 		previousGeneration := s.Grants[a.ID].Generation
 		g := storage.Grant{ID: local.Random(), ClientID: a.ID, Capability: contracts.AssignmentsCapability, Version: "1", AccountRef: c.AccountRef, CredentialID: c.ID, Courses: append([]string(nil), q.Courses...), View: q.View, Limit: q.Limit, Generation: previousGeneration + 1, Active: true, Expires: expires}
+		if canvasRead {
+			g.Capability = q.Capability
+		}
 		b.adminMu.Lock()
 		defer b.adminMu.Unlock()
 		unlock := b.Store.Fence("app", a.ID)

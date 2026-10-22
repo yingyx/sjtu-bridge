@@ -69,7 +69,7 @@ func privateCampusSchema(t *testing.T, id, resource, view string) json.RawMessag
 func TestCampusStaticInputRulesRejectUnrelatedParameters(t *testing.T) {
 	for _, test := range []struct{ id, valid, invalid string }{
 		{MailCapability, `{"account_ref":"synthetic-a","resource_ref":"mail:folder:inbox","view":"headers_v1","limit":50,"query":"通知"}`, `{"account_ref":"synthetic-a","resource_ref":"mail:folder:other","view":"headers_v1","limit":50}`},
-		{ActivityCapability, `{"account_ref":"synthetic-a","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":20}`, `{"account_ref":"synthetic-a","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":20,"query":"unexpected"}`},
+		{ActivityCapability, `{"account_ref":"synthetic-a","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":20,"query":"讲座","activity_type_id":"1","child_type_ids":["2"],"states":["1","3"]}`, `{"account_ref":"synthetic-a","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":20,"date":"2030-01-01"}`},
 		{ElectricityBalanceCapability, `{"account_ref":"synthetic-a","resource_ref":"electric:room:1","view":"balance_v1","limit":1}`, `{"account_ref":"synthetic-a","resource_ref":"electric:room:1","view":"balance_v1","limit":1,"cursor":"unexpected"}`},
 	} {
 		var schema jsonschema.Schema

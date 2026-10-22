@@ -24,11 +24,12 @@ type AssignmentData struct {
 	Items []Assignment `json:"items"`
 }
 type PageMeta struct {
-	Provider   string    `json:"provider"`
-	Coverage   string    `json:"coverage"`
-	FetchedAt  time.Time `json:"fetched_at"`
-	NextCursor *string   `json:"next_cursor"`
-	HasMore    bool      `json:"has_more"`
+	Provider           string    `json:"provider"`
+	Coverage           string    `json:"coverage"`
+	FetchedAt          time.Time `json:"fetched_at"`
+	NextCursor         *string   `json:"next_cursor"`
+	HasMore            bool      `json:"has_more"`
+	UnavailableModules []string  `json:"unavailable_modules,omitempty"`
 }
 type AssignmentResponse struct {
 	SchemaVersion string         `json:"schema_version"`

@@ -104,6 +104,14 @@ func (p *Personal) Discover(token string, send func([]contracts.Capability) erro
 		}
 		if l != nil && l.Grant.Capability != contracts.AssignmentsCapability {
 			g := l.Grant
+			if _, canvasRead := contracts.CanvasRules(g.Capability); canvasRead {
+				if _, available := p.Provider.(domain.CanvasReader); available {
+					if c, ok := contracts.CanvasCapability(g.Capability, g.AccountRef, g.Courses, g.View, g.Limit); ok && policy.PersonalAllowed(c) {
+						caps = append(caps, c)
+					}
+				}
+				return send(caps)
+			}
 			c, ok := contracts.CampusCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit)
 			if ok && policy.PersonalAllowed(c) && p.CampusProviders[c.Provider] != nil {
 				caps = append(caps, c)
@@ -152,7 +160,10 @@ func Safe(err error) error {
 // Invoke publishes exactly one bounded JSON buffer. Authorization is checked
 // under the same per-object fences used by durable management revocations.
 func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
-	if inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability || inv.Capability == contracts.ActivityCapability || inv.Capability == contracts.ElectricityBalanceCapability {
+	if _, known := contracts.CanvasRules(inv.Capability); known {
+		return p.invokeCanvas(ctx, token, inv, send)
+	}
+	if _, known := contracts.CampusRules(inv.Capability); known {
 		return p.invokeCampus(ctx, token, inv, send)
 	}
 	ctx, request := p.startRequest(ctx, contracts.AssignmentsCapability)

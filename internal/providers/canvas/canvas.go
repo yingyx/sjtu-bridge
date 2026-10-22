@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/strictjson"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
 
@@ -36,6 +37,9 @@ var numeric = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
 func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) {
 		return false
+	}
+	if learningAllowed(u) {
+		return true
 	}
 	if u.Path == "/api/v1/users/self/profile" {
 		return u.RawQuery == ""
@@ -87,12 +91,19 @@ func (p *Provider) read(ctx context.Context, u *url.URL) (transport.Reply, error
 	if err != nil {
 		return r, err
 	}
+	if r.Status == http.StatusNotFound {
+		return r, contracts.Fail("NOT_FOUND", "Canvas resource or course tool is not available to this account")
+	}
 	if err := transport.Status(r.Status); err != nil {
 		return r, err
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		return r, contracts.Fail("UPSTREAM_CHANGED", "Expected Canvas JSON; sign-in HTML is not a successful API response")
+	}
+	var document any
+	if strictjson.Decode(r.Body, &document) != nil {
+		return r, contracts.Fail("UPSTREAM_CHANGED", "Canvas returned ambiguous or invalid JSON")
 	}
 	return r, nil
 }

@@ -7,10 +7,11 @@ import (
 )
 
 type CampusPage struct {
-	AccountRef string
-	Rows       []contracts.CampusRecord
-	Next       string
-	Coverage   string
+	AccountRef         string
+	Rows               []contracts.CampusRecord
+	Next               string
+	Coverage           string
+	UnavailableModules []string
 }
 type Campus interface {
 	Identity(context.Context, []byte) (string, error)
@@ -41,4 +42,14 @@ type Canvas interface {
 	Identity(context.Context, []byte) (string, error)
 	Courses(context.Context, []byte, string) ([]CanvasCourse, error)
 	Assignments(context.Context, []byte, string, string, int, string) (AssignmentPage, error)
+}
+
+// CanvasReader extends the course-scoped read surface without changing owner
+// authentication or the existing assignment port. Courses come from the lease.
+type CanvasReader interface {
+	ReadCanvas(context.Context, []byte, string, string, contracts.CanvasQuery, []string, string) (CanvasPage, error)
+}
+type CanvasPage struct {
+	Rows []contracts.CanvasRecord
+	Next string
 }

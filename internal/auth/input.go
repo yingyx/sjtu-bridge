@@ -13,7 +13,7 @@ import (
 
 // Normalize accepts one credential value, not an HTTP header or cookie dump.
 func Normalize(provider string, secret []byte) ([]byte, error) {
-	if provider != "canvas" && provider != "jaccount" {
+	if provider != "canvas" && provider != "jaccount" && provider != "jcourse" {
 		return nil, contracts.Fail("UNSUPPORTED", "Unknown credential provider")
 	}
 	value := string(secret)
@@ -45,6 +45,9 @@ func ReadCredential(input io.Reader, diagnostics io.Writer, provider string, per
 	}
 	f := input.(*os.File)
 	label := "Canvas Token"
+	if provider == "jcourse" {
+		label = "jCourse API Key"
+	}
 	if provider == "jaccount" {
 		label = "JAAuthCookie"
 	}

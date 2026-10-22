@@ -22,8 +22,11 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/engine"
 	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/providers/activity"
+	"github.com/yingyx/sjtu-bridge/internal/providers/bath"
 	"github.com/yingyx/sjtu-bridge/internal/providers/canvas"
+	"github.com/yingyx/sjtu-bridge/internal/providers/dekt"
 	"github.com/yingyx/sjtu-bridge/internal/providers/electric"
+	"github.com/yingyx/sjtu-bridge/internal/providers/jcourse"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sjtumail"
 	"github.com/yingyx/sjtu-bridge/internal/providers/teaching"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
@@ -121,9 +124,15 @@ func Run(ctx context.Context) error {
 	defer closeMail()
 	activityService, closeActivity := activity.New()
 	defer closeActivity()
+	dektService, closeDekt := dekt.New()
+	defer closeDekt()
 	electricService, closeElectric := electric.New()
 	defer closeElectric()
-	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "electric": electricService}
+	bathService, closeBath := bath.New()
+	defer closeBath()
+	jcourseService, closeJCourse := jcourse.New()
+	defer closeJCourse()
+	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "dekt": dektService, "electric": electricService, "bath": bathService, "jcourse": jcourseService}
 	return b.Serve(ctx, l)
 }
 func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
@@ -257,7 +266,8 @@ func (b *Broker) invoke(ctx context.Context, token string, inv contracts.Invocat
 	if err := b.Engine.Discover(token, func([]contracts.Capability) error { return nil }); err != nil {
 		return err
 	}
-	if inv.Capability == contracts.AssignmentsCapability || inv.Capability == contracts.TimetableCapability || inv.Capability == contracts.MailCapability || inv.Capability == contracts.ActivityCapability || inv.Capability == contracts.ElectricityBalanceCapability {
+	_, canvasRead := contracts.CanvasRules(inv.Capability)
+	if _, campus := contracts.CampusRules(inv.Capability); campus || inv.Capability == contracts.AssignmentsCapability || canvasRead {
 		return b.Engine.Invoke(ctx, token, inv, send)
 	}
 	if b.publicErr != nil {

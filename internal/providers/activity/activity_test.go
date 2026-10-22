@@ -23,6 +23,7 @@ type fake struct {
 	t       *testing.T
 	account string
 	rows    string
+	types   string
 	total   int
 	alter   func(*url.URL, transport.Reply) transport.Reply
 	calls   []string
@@ -39,6 +40,11 @@ func (f *fake) Get(_ context.Context, u *url.URL, h http.Header) (transport.Repl
 		switch u.Path {
 		case "/api/v1/login/url":
 			r.Body = []byte(`{"code":200,"data":` + strconv.Quote(authStart) + `}`)
+		case "/api/v1/system/activity_type":
+			if h.Get("Authorization") != "Bearer SYNTHETIC_BEARER_TOKEN" {
+				f.t.Fatal("type dictionary fetched without portal authorization")
+			}
+			r.Body = []byte(`{"code":200,"data":` + f.types + `}`)
 		case "/api/v1/login/token":
 			if u.Query().Get("code") != "SYNTHETIC_CODE" || h.Get("Authorization") != "" {
 				f.t.Fatal("incorrect code or token leak")
@@ -185,7 +191,7 @@ func TestClosedEndpointsAndAuthFailures(t *testing.T) {
 }
 
 func TestScopeAndMalformedResponses(t *testing.T) {
-	for _, change := range []func(*contracts.CampusQuery){func(q *contracts.CampusQuery) { q.AccountRef += "OTHER" }, func(q *contracts.CampusQuery) { q.ResourceRef = "activity:feed:other" }, func(q *contracts.CampusQuery) { q.View = "detail_v1" }, func(q *contracts.CampusQuery) { q.Query = "query" }, func(q *contracts.CampusQuery) { q.Limit = 21 }} {
+	for _, change := range []func(*contracts.CampusQuery){func(q *contracts.CampusQuery) { q.AccountRef += "OTHER" }, func(q *contracts.CampusQuery) { q.ResourceRef = "activity:feed:other" }, func(q *contracts.CampusQuery) { q.View = "detail_v1" }, func(q *contracts.CampusQuery) { q.Month = "2026-10" }, func(q *contracts.CampusQuery) { q.Limit = 21 }} {
 		s, f, q := service(t)
 		account := q.AccountRef
 		change(&q)

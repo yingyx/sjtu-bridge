@@ -10,7 +10,13 @@ func TestCampusRulesRejectInvalidGrantsAndQueries(t *testing.T) {
 	}{
 		{TimetableCapability, "schedule_v1", "teaching:term:2030:1", 100, false, true},
 		{MailCapability, "headers_v1", "mail:folder:inbox", 50, true, true},
-		{ActivityCapability, "summaries_v1", "activity:feed:visible", 20, false, true},
+		{ActivityCapability, "summaries_v1", "activity:feed:visible", 20, true, true},
+		{ActivityTypesCapability, ActivityTypesView, "activity:types:visible", 100, false, true},
+		{ActivityRegistrationsCapability, ActivityRegistrationsView, "activity:registrations:self", 20, true, true},
+		{ActivityCollectionsCapability, ActivityCollectionsView, "activity:collections:self", 20, false, true},
+		{SecondClassHonorsCapability, SecondClassHonorsView, "dekt:honors:self", 50, false, true},
+		{SecondClassPracticeCapability, SecondClassPracticeView, "dekt:practice:self", 50, false, true},
+		{SecondClassEducationCapability, SecondClassEducationView, "dekt:education:self", 50, false, true},
 		{ElectricityBalanceCapability, "balance_v1", "electric:room:7", 1, false, false},
 	} {
 		t.Run(tc.id, func(t *testing.T) {

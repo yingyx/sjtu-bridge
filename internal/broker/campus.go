@@ -17,10 +17,10 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 		return nil, contracts.Fail("PERMISSION_DENIED", "Campus capability is not available")
 	}
 	app, credential := s.Apps[q.ClientID], s.Credentials[q.CredentialID]
-	if !app.Active || !time.Now().Before(app.Expires) || !credential.Active || credential.Provider != metadata.Provider || credential.Kind != "JAAuthCookie" || credential.AccountRef != q.AccountRef {
+	if !app.Active || !time.Now().Before(app.Expires) || !credential.Active || credential.Provider != metadata.Provider || len(metadata.Credentials) != 1 || credential.Kind != metadata.Credentials[0] || credential.AccountRef != q.AccountRef {
 		return nil, contracts.Fail("PERMISSION_DENIED", "Matching active app and portal credential required")
 	}
-	if e := b.Store.CheckSourceCredential(credential); e != nil {
+	if e := b.Store.CheckCredential(credential); e != nil {
 		return nil, e
 	}
 	rules, known := contracts.CampusRules(q.Capability)
@@ -29,13 +29,13 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	}
 	// This identity check does not enumerate mailbox contents or grant a domain.
 	e := b.Engine.Do(ctx, func(ctx context.Context) error {
-		secret, e := b.Store.SourceCredentialSecret(credential)
+		secret, e := b.Store.CheckedCredentialSecret(credential)
 		if e != nil {
 			return e
 		}
 		defer clear(secret)
 		actual := ""
-		if q.Capability == contracts.ElectricityBalanceCapability {
+		if metadata.Provider == "electric" {
 			binding, ok := b.Engine.CampusProviders[metadata.Provider].(domain.CampusBinding)
 			if !ok {
 				return contracts.Fail("UNSUPPORTED", "Bound-room identity is unavailable")
@@ -72,7 +72,7 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	defer b.adminMu.Unlock()
 	unlock := b.Store.Fence("app", app.ID)
 	defer unlock()
-	if e = b.Store.CheckSourceCredential(credential); e != nil {
+	if e = b.Store.CheckCredential(credential); e != nil {
 		return nil, e
 	}
 	e = b.Store.Update([]string{"grant:" + app.ID}, func(s *storage.State) error {

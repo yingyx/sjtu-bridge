@@ -44,6 +44,8 @@ func Allowed(u *url.URL) bool {
 	switch u.Path {
 	case "/":
 		return len(q) == 0 || (len(q) == 2 && q.Get("code") != "" && q.Get("state") != "")
+	case "/api/rechage/ydlmx":
+		return len(q) == 2 && contracts.ValidDateRange(q.Get("begin"), q.Get("end"), 366)
 	case "/api/me/info", "/api/ws/sydl":
 		return len(q) == 0
 	}

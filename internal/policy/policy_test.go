@@ -26,7 +26,7 @@ func TestReviewedCatalogExecutionCeiling(t *testing.T) {
 		t.Fatal("private capability crossed public boundary")
 	}
 	personal := []contracts.Capability{private}
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability, contracts.ElectricityBalanceCapability} {
+	for _, id := range contracts.CampusCapabilityIDs() {
 		c, ok := contracts.PersonalMetadata(id)
 		if !ok || !PersonalAllowed(c) || Allowed("public", c, "") {
 			t.Fatal("personal ceiling or public isolation", id)
