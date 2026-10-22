@@ -305,6 +305,6 @@ func services(in contracts.ListInput) (contracts.Response, error) {
 		result.Meta.HasMore = true
 		result.Meta.NextCursor = &next
 	}
-	result.Warnings = []contracts.Warning{{Code: "BUNDLED_DIRECTORY", Message: "Reviewed 2026-10-20; selected portal locators only, not a complete service inventory or a live availability check. Related capability IDs grant no access."}}
+	result.Warnings = []contracts.Warning{{Code: "BUNDLED_DIRECTORY", Message: "Selected portal locators from the bundled task directory, not a complete service inventory or a live availability check. Use services describe for task sources and review dates. Related capability IDs grant no access."}}
 	return result, nil
 }

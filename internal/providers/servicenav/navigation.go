@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/yingyx/sjtu-bridge/contracts"
+	"github.com/yingyx/sjtu-bridge/internal/servicecatalog"
 )
 
-const revision = "2026-10-21-navigation-v6"
+const revision = servicecatalog.Revision
 
 type Provider struct{}
 
@@ -60,6 +61,7 @@ func (Provider) List(ctx context.Context, capability string, input contracts.Lis
 		g.Sources = append([]contracts.NavigationSource{}, g.Sources...)
 		g.Upstream.Effects = append([]contracts.Effect{}, g.Upstream.Effects...)
 		item.Navigation = &g
+		item.Fields = append([]contracts.PublicField{}, item.Fields...)
 		page = append(page, item)
 		for _, source := range g.Sources {
 			if !seen[source.URL] {

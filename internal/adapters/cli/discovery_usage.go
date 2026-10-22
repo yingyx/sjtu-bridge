@@ -68,7 +68,7 @@ func writeCapabilityUsage(out io.Writer, root *cobra.Command, c contracts.Capabi
 		CapabilitySummary: discoverySummaries([]contracts.Capability{c}, connected)[0],
 		InputSchema:       c.InputSchema, CLIFlags: map[string]string{},
 	}
-	command, _, _ := root.Find(strings.Split(c.ID, "."))
+	command, _, _ := root.Find(contracts.CLIPath(c.ID))
 	example := []string{usage.CLICommand}
 	for _, name := range names {
 		flag := cliFlagName(name)

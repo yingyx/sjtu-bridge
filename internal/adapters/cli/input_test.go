@@ -212,7 +212,7 @@ func TestJSONIntegerSpellingMatchesExecutionContracts(t *testing.T) {
 	for _, number := range []string{"1.0", "1e0", "1E+0", "1.00000000000000000000000000001", "0.99999999999999999999999999999"} {
 		var out, diag bytes.Buffer
 		input := `{"limit":` + number + `}`
-		args := []string{"public", "services", "list", "--input-json-stdin", "--json"}
+		args := []string{"campus", "websites", "list", "--input-json-stdin", "--json"}
 		if exit := Execute(context.Background(), args, &out, &diag, strings.NewReader(input)); exit != 1 || out.Len() != 0 {
 			t.Fatal(number, exit, out.String(), diag.String())
 		}
@@ -227,7 +227,7 @@ func TestJSONIntegerSpellingMatchesExecutionContracts(t *testing.T) {
 		}
 	}
 	var out, diag bytes.Buffer
-	if exit := Execute(context.Background(), []string{"public", "services", "list", "--input-json-stdin", "--json"}, &out, &diag, strings.NewReader(`{"limit":1}`)); exit != 0 || diag.Len() != 0 {
+	if exit := Execute(context.Background(), []string{"campus", "websites", "list", "--input-json-stdin", "--json"}, &out, &diag, strings.NewReader(`{"limit":1}`)); exit != 0 || diag.Len() != 0 {
 		t.Fatal(exit, out.String(), diag.String())
 	}
 	var response contracts.Response

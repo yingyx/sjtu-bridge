@@ -54,7 +54,7 @@ func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
 			}
 		}
 		var out, diag bytes.Buffer
-		args := append(strings.Split(c.ID, "."), "--limit", "2", "--json")
+		args := append(contracts.CLIPath(c.ID), "--limit", "2", "--json")
 		if cli.Execute(ctx, args, &out, &diag, strings.NewReader("")) != 0 {
 			t.Fatal(diag.String())
 		}
@@ -73,7 +73,7 @@ func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
 		}
 		out.Reset()
 		diag.Reset()
-		if cli.Execute(ctx, strings.Split(c.ID, "."), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官网入口") || !strings.Contains(out.String(), "需前往官网办理") || !strings.Contains(out.String(), "本次未检查链接") || diag.Len() != 0 {
+		if cli.Execute(ctx, contracts.CLIPath(c.ID), &out, &diag, strings.NewReader("")) != 0 || !strings.Contains(out.String(), "官网入口") || !strings.Contains(out.String(), "需前往官网办理") || !strings.Contains(out.String(), "本次未检查链接") || diag.Len() != 0 {
 			t.Fatal("text output conceals manual boundary", out.String(), diag.String())
 		}
 	}

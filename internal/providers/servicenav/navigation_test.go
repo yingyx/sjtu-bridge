@@ -56,7 +56,10 @@ func TestNavigationRoutesWithoutCopyingRules(t *testing.T) {
 				t.Fatal("unknown upstream operation", id, n.Upstream)
 			}
 			for _, related := range n.RelatedCapabilities {
-				if !known[related] {
+				// Static links may point to separately granted personal queries;
+				// knowing their ID never makes them callable from public mode.
+				_, personal := contracts.PersonalMetadata(related)
+				if !known[related] && !personal {
 					t.Fatal("dead capability link", related)
 				}
 			}
@@ -68,6 +71,9 @@ func TestNavigationRoutesWithoutCopyingRules(t *testing.T) {
 		n := first.Data.Items[0].Navigation
 		n.Sources[0].URL = "changed"
 		n.Upstream.Effects[0] = contracts.Effect("changed")
+		if len(first.Data.Items[0].Fields) > 0 {
+			first.Data.Items[0].Fields[0].Value = "changed"
+		}
 		if len(n.CrossListings) > 0 {
 			n.CrossListings[0].Category = "changed"
 		}

@@ -6,6 +6,7 @@ import (
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/app"
 	"github.com/yingyx/sjtu-bridge/internal/engine"
+	"github.com/yingyx/sjtu-bridge/internal/servicecatalog"
 )
 
 type Options struct{ Profile string }
@@ -23,6 +24,17 @@ func New(options Options) (*Engine, error) {
 }
 func (e *Engine) Close()                               { e.close() }
 func (e *Engine) Capabilities() []contracts.Capability { return e.core.Capabilities() }
+
+// Services searches reviewed task locators, including tasks with no executable
+// capability. Available actions are projected from this public Engine's catalog.
+func (e *Engine) Services(filter contracts.ServiceFilter) (contracts.ServicePage, error) {
+	return servicecatalog.Search(e.Capabilities(), filter)
+}
+
+func (e *Engine) DescribeService(id string) (contracts.ServiceEntry, error) {
+	return servicecatalog.Describe(e.Capabilities(), id)
+}
+
 func (e *Engine) Invoke(ctx context.Context, in contracts.Invocation) (contracts.Response, error) {
 	return e.core.Invoke(ctx, in)
 }

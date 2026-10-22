@@ -18,7 +18,7 @@ func TestHelpSeparatesTasksManagementAndRuntime(t *testing.T) {
 		t.Fatal(diag.String())
 	}
 	help := out.String()
-	discovery := strings.Index(help, "能力发现：")
+	discovery := strings.Index(help, "事项与能力发现：")
 	services := strings.Index(help, "校园服务：")
 	management := strings.Index(help, "用户管理：")
 	runtime := strings.Index(help, "接入与诊断：")
@@ -30,7 +30,7 @@ func TestHelpSeparatesTasksManagementAndRuntime(t *testing.T) {
 		names      []string
 	}{
 		{discovery, services, []string{"capabilities"}},
-		{services, management, []string{"canvas", "public"}},
+		{services, management, []string{"learning", "campus", "digital", "development"}},
 		{management, runtime, []string{"auth", "apps", "broker", "permissions"}},
 		{runtime, len(help), []string{"doctor", "mcp"}},
 	} {
@@ -232,7 +232,7 @@ func TestConnectedDiscoveryNeverFallsBackToPublic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.connection")
 	for _, args := range [][]string{
 		{"capabilities", "list"}, {"capabilities", "search", "校历"},
-		{"capabilities", "describe", "public.services.list"}, {"public", "services", "list"},
+		{"capabilities", "describe", "public.services.list"}, {"campus", "websites", "list"},
 	} {
 		var out, diag bytes.Buffer
 		args = append(args, "--connection", path, "--json")
@@ -246,7 +246,7 @@ func TestExplicitEmptyConnectionIsRejected(t *testing.T) {
 	for _, args := range [][]string{
 		{"capabilities", "list"}, {"capabilities", "search", "校历"},
 		{"capabilities", "describe", "public.services.list"},
-		{"public", "services", "list"}, {"mcp", "serve"},
+		{"campus", "websites", "list"}, {"mcp", "serve"},
 	} {
 		for _, value := range []string{"", "   "} {
 			var out, diag bytes.Buffer

@@ -52,14 +52,14 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		if provider == "jaccount" {
 			return contracts.Fail("NOT_READY", "JAAuthCookie stable identity is not ready for persistent import")
 		}
-		if provider != "canvas" && provider != "teaching" && provider != "sjtumail" && provider != "activity" && provider != "electric" {
-			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, teaching, sjtumail, activity or electric")
+		if provider != "canvas" && provider != "jcourse" && !campusCredentialProvider(provider) {
+			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, jcourse, teaching, sjtumail, activity, dekt, electric or bath")
 		}
-		if browserContext && provider == "canvas" {
+		if browserContext && (provider == "canvas" || provider == "jcourse") {
 			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for campus JAAuthCookie providers")
 		}
 		normalizer := provider
-		if provider != "canvas" {
+		if provider != "canvas" && provider != "jcourse" {
 			normalizer = "jaccount"
 		}
 		secret, e := auth.ReadCredential(input, diag, normalizer, true)
@@ -93,7 +93,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return write(v)
 	}}
-	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), teaching / sjtumail / activity / electric (JAAuthCookie, independently verified portal account)")
+	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), jcourse (API Key), teaching / sjtumail / activity / dekt / electric / bath (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
@@ -212,7 +212,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	grant.Flags().StringSliceVar(&g.Courses, "courses", nil, "Exact course_refs, comma separated")
 	grant.Flags().StringVar(&g.Capability, "capability", contracts.AssignmentsCapability, "Exact capability ID; one active grant per app")
 	grant.Flags().StringSliceVar(&g.Resources, "resources", nil, "Exact portal resource_refs; use auth resources for the verified electricity room")
-	grant.Flags().StringVar(&g.View, "view", "", "Canvas: summary_v1/deadlines_v1; timetable: schedule_v1; inbox: headers_v1; activities: summaries_v1; electricity: balance_v1 (limit=1)")
+	grant.Flags().StringVar(&g.View, "view", "", "Exact fixed view from capabilities describe; each capability requires its own grant")
 	grant.Flags().IntVar(&g.Limit, "limit", 20, "Per-call item cap (1-100)")
 	grant.Flags().IntVar(&g.Days, "days", 30, "Grant lifetime (1-30 days)")
 	for _, flag := range []string{"app", "credential", "account", "view"} {
@@ -225,13 +225,14 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	_ = revokeGrant.MarkFlagRequired("app")
 	permissions.AddCommand(revokeGrant)
 	root.AddCommand(permissions)
-	canvas := &cobra.Command{Use: "canvas", GroupID: "services", Short: "Canvas 学习任务与作业查询"}
-	assignments := &cobra.Command{Use: "assignments", Short: "课程作业与截止时间"}
+	assignmentMetadata := contracts.AssignmentMetadata()
+	assignmentPath := contracts.CLIPath(contracts.AssignmentsCapability)
+	assignments := ensureCommandPath(root, assignmentPath[:len(assignmentPath)-1], assignmentMetadata.CategoryLabel)
 	var q contracts.AssignmentQuery
 	var assignmentInput *jsonInputOptions
 	assignmentSchema := contracts.AssignmentInputSchema()
 	assignmentFlags := []string{"account", "course", "view", "limit", "cursor"}
-	list := &cobra.Command{Use: "list", Short: "查询获准课程的作业与截止时间", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: assignmentPath[len(assignmentPath)-1], Short: "查询获准课程的作业与截止时间", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if e := requirePrivateConnection(*connection); e != nil {
 			return e
 		}
@@ -250,7 +251,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return write(v)
 	}}
-	list.Example = "  sjtu capabilities describe canvas.assignments.list --connection CONNECTION\n  sjtu canvas assignments list --connection CONNECTION --account ACCOUNT --course COURSE --view deadlines_v1 --limit 20"
+	list.Example = "  sjtu capabilities describe " + contracts.AssignmentsCapability + " --connection CONNECTION\n  " + assignmentMetadata.CLICommand + " --connection CONNECTION --account ACCOUNT --course COURSE --view deadlines_v1 --limit 20"
 	list.Flags().StringVar(&q.AccountRef, "account", "", "")
 	list.Flags().StringVar(&q.CourseRef, "course", "", "")
 	list.Flags().StringVar(&q.View, "view", "", "")
@@ -259,27 +260,21 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	applySchemaFlagHelp(list, assignmentSchema)
 	assignmentInput = addJSONInputFlags(list)
 	assignments.AddCommand(list)
-	canvas.AddCommand(assignments)
-	root.AddCommand(canvas)
-	for _, id := range []string{contracts.TimetableCapability, contracts.MailCapability, contracts.ActivityCapability, contracts.ElectricityBalanceCapability} {
+	addCanvasCommands(root, connection, input, write)
+	for _, id := range contracts.CampusCapabilityIDs() {
 		metadata, _ := contracts.PersonalMetadata(id)
 		rules, _ := contracts.CampusRules(id)
+		defaultLimit := min(20, rules.MaxLimit)
+		if !rules.Paginated {
+			defaultLimit = rules.MaxLimit
+		}
 		schema := contracts.CampusInputSchema(id)
-		parts := strings.Split(id, ".")
-		group := findCommand(root, parts[0])
-		if group == nil {
-			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: metadata.CategoryLabel}
-			root.AddCommand(group)
-		}
-		resource := findCommand(group, parts[1])
-		if resource == nil {
-			resource = &cobra.Command{Use: parts[1], Short: metadata.Title}
-			group.AddCommand(resource)
-		}
+		parts := contracts.CLIPath(id)
+		resource := ensureCommandPath(root, parts[:len(parts)-1], metadata.CategoryLabel)
 		var q contracts.CampusQuery
 		var jsonInput *jsonInputOptions
 		businessFlags := []string{"account", "resource", "view", "limit", "cursor"}
-		list := &cobra.Command{Use: parts[2], Short: metadata.Title, Long: metadata.Description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		list := &cobra.Command{Use: parts[len(parts)-1], Short: metadata.Title, Long: metadata.Description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if e := requirePrivateConnection(*connection); e != nil {
 				return e
 			}
@@ -298,15 +293,45 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			}
 			return write(v)
 		}}
-		list.Example = "  sjtu capabilities describe " + id + " --connection CONNECTION\n  sjtu " + strings.ReplaceAll(id, ".", " ") + " --connection CONNECTION --account ACCOUNT --resource RESOURCE --view " + rules.View + " --limit " + fmt.Sprint(min(20, rules.MaxLimit))
+		list.Example = "  sjtu capabilities describe " + id + " --connection CONNECTION\n  " + metadata.CLICommand + " --connection CONNECTION --account ACCOUNT --resource RESOURCE --view " + rules.View + " --limit " + fmt.Sprint(defaultLimit)
+		if id == contracts.ActivityCalendarCapability {
+			list.Example += " --activity-type-id TYPE_ID --date YYYY-MM-DD"
+		} else if id == contracts.ActivityCountsCapability {
+			list.Example += " --activity-type-id TYPE_ID --month YYYY-MM"
+		}
 		list.Flags().StringVar(&q.AccountRef, "account", "", "")
 		list.Flags().StringVar(&q.ResourceRef, "resource", "", "")
 		list.Flags().StringVar(&q.View, "view", "", "")
-		list.Flags().IntVar(&q.Limit, "limit", min(20, rules.MaxLimit), "")
+		list.Flags().IntVar(&q.Limit, "limit", defaultLimit, "")
 		list.Flags().StringVar(&q.Cursor, "cursor", "", "")
 		if rules.QueryAllowed {
 			list.Flags().StringVar(&q.Query, "query", "", "")
 			businessFlags = append(businessFlags, "query")
+		}
+		for _, field := range []struct {
+			name   string
+			target *string
+		}{
+			{"activity_type_id", &q.ActivityTypeID}, {"date", &q.Date}, {"month", &q.Month}, {"begin", &q.Begin}, {"end", &q.End},
+			{"department", &q.Department}, {"language", &q.Language}, {"category", &q.Category}, {"target_year", &q.TargetYear}, {"credit", &q.Credit}, {"has_review", &q.HasReview}, {"order_by", &q.OrderBy}, {"ascend", &q.Ascend}, {"teacher_title", &q.TeacherTitle}, {"semester", &q.Semester}, {"rating", &q.Rating}, {"period", &q.Period},
+		} {
+			if rules.AllowsInputField(field.name) {
+				flag := cliFlagName(field.name)
+				list.Flags().StringVar(field.target, flag, "", "")
+				businessFlags = append(businessFlags, flag)
+			}
+		}
+		for _, field := range []struct {
+			name   string
+			target *[]string
+		}{
+			{"child_type_ids", &q.ChildTypeIDs}, {"states", &q.States},
+		} {
+			if rules.AllowsInputField(field.name) {
+				flag := cliFlagName(field.name)
+				list.Flags().StringSliceVar(field.target, flag, nil, "")
+				businessFlags = append(businessFlags, flag)
+			}
 		}
 		applySchemaFlagHelp(list, schema)
 		jsonInput = addJSONInputFlags(list)

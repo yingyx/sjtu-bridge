@@ -16,6 +16,7 @@ import (
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/local"
+	"github.com/yingyx/sjtu-bridge/internal/servicecatalog"
 )
 
 type Client struct {
@@ -105,6 +106,31 @@ func (c *Client) Capabilities(ctx context.Context) ([]contracts.Capability, erro
 	e := c.call(ctx, "/v1/capabilities", nil, &v)
 	return v, e
 }
+
+// Services always authenticates with the Broker before projecting available
+// actions. A failed connection never falls back to the public task directory.
+func (c *Client) Services(ctx context.Context, filter contracts.ServiceFilter) (contracts.ServicePage, error) {
+	caps, err := c.Capabilities(ctx)
+	if err != nil {
+		return contracts.ServicePage{}, err
+	}
+	if ctx.Err() != nil {
+		return contracts.ServicePage{}, contracts.Fail("CANCELED", "Request canceled")
+	}
+	return servicecatalog.Search(caps, filter)
+}
+
+func (c *Client) DescribeService(ctx context.Context, id string) (contracts.ServiceEntry, error) {
+	caps, err := c.Capabilities(ctx)
+	if err != nil {
+		return contracts.ServiceEntry{}, err
+	}
+	if ctx.Err() != nil {
+		return contracts.ServiceEntry{}, contracts.Fail("CANCELED", "Request canceled")
+	}
+	return servicecatalog.Describe(caps, id)
+}
+
 func (c *Client) Invoke(ctx context.Context, inv contracts.Invocation) (json.RawMessage, error) {
 	var v json.RawMessage
 	e := c.call(ctx, "/v1/invoke", inv, &v)

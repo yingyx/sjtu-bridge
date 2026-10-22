@@ -17,17 +17,17 @@ func TestActionableErrorsInTextAndJSON(t *testing.T) {
 		want []string
 	}{
 		{[]string{"capabilites"}, []string{"capabilities", "--help"}},
-		{[]string{"canvas", "assignmnts"}, []string{"assignments", "--help"}},
+		{[]string{"learning", "canvas", "assignmnts"}, []string{"assignments", "--help"}},
 		{[]string{"learning", "classroms"}, []string{"classrooms", "--help"}},
-		{[]string{"canvas", "courses", "list"}, []string{"--help"}},
+		{[]string{"learning", "canvas", "courses", "list"}, []string{"--connection"}},
 		{[]string{"completion", "wrong"}, []string{"--help"}},
 		{[]string{"help", "wrong"}, []string{"帮助主题", "--help"}},
 		{[]string{"capabilities", "search"}, []string{"QUERY", "sjtu capabilities search --help"}},
-		{[]string{"public", "calendars", "list", "--limit", "SYNTHETIC_SECRET"}, []string{"limit", "int"}},
-		{[]string{"public", "calendars", "list", "--limt", "1"}, []string{"--limit"}},
-		{[]string{"public", "calendars", "list", "--limit"}, []string{"limit", "缺少值"}},
+		{[]string{"learning", "calendars", "list", "--limit", "SYNTHETIC_SECRET"}, []string{"limit", "int"}},
+		{[]string{"learning", "calendars", "list", "--limt", "1"}, []string{"--limit"}},
+		{[]string{"learning", "calendars", "list", "--limit"}, []string{"limit", "缺少值"}},
 		{[]string{"auth", "remove"}, []string{"credential", "必填"}},
-		{[]string{"public", "calendars", "list", "--limit", "101"}, []string{"limit", "1–100"}},
+		{[]string{"learning", "calendars", "list", "--limit", "101"}, []string{"limit", "1–100"}},
 		{[]string{"learning", "classrooms", "available"}, []string{"building_id", "date", "start_section", "end_section"}},
 		{[]string{"learning", "classrooms", "list", "--room-features", "[]"}, []string{"room-features", "json"}},
 		{[]string{"learning", "timetable", "list"}, []string{"--connection"}},
@@ -72,7 +72,7 @@ func TestErrorDoesNotEchoUnknownInputOrMisclassifyInternalFailure(t *testing.T) 
 
 func TestJSONSwitchDoesNotInterpretParameterValues(t *testing.T) {
 	root := New(&bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader(""))
-	cmd, _, _ := root.Find([]string{"public", "calendars", "list"})
+	cmd, _, _ := root.Find([]string{"learning", "calendars", "list"})
 	for _, args := range [][]string{{"--input-file", "--json"}, {"--", "--json"}, {"--json=false"}} {
 		if jsonRequested(cmd, args) {
 			t.Fatal(args)
@@ -85,13 +85,13 @@ func TestErrorJSONModeSurvivesEarlierParseFailures(t *testing.T) {
 		args []string
 		json bool
 	}{
-		{[]string{"public", "services", "list", "--limit", "bad", "--json"}, true},
-		{[]string{"public", "services", "list", "--json", "--limit", "bad", "--json=false"}, false},
-		{[]string{"public", "services", "list", "--json=false", "--limit", "bad", "--json"}, true},
-		{[]string{"public", "services", "list", "--json", "--input-file", "--json=false"}, true},
-		{[]string{"public", "services", "list", "--input-file=--json"}, false},
-		{[]string{"public", "services", "list", "--SYNTHETIC_SECRET", "--json"}, true},
-		{[]string{"public", "services", "list", "--", "--json"}, false},
+		{[]string{"campus", "websites", "list", "--limit", "bad", "--json"}, true},
+		{[]string{"campus", "websites", "list", "--json", "--limit", "bad", "--json=false"}, false},
+		{[]string{"campus", "websites", "list", "--json=false", "--limit", "bad", "--json"}, true},
+		{[]string{"campus", "websites", "list", "--json", "--input-file", "--json=false"}, true},
+		{[]string{"campus", "websites", "list", "--input-file=--json"}, false},
+		{[]string{"campus", "websites", "list", "--SYNTHETIC_SECRET", "--json"}, true},
+		{[]string{"campus", "websites", "list", "--", "--json"}, false},
 	} {
 		var out, diag bytes.Buffer
 		if exit := Execute(context.Background(), test.args, &out, &diag, strings.NewReader("")); exit != 1 || out.Len() != 0 {
@@ -109,10 +109,10 @@ func TestRecoveryHintsDistinguishCursorAndAuditFailures(t *testing.T) {
 		name, path, code, message string
 		want, absent              []string
 	}{
-		{"private_cursor", "canvas assignments list", "PERMISSION_DENIED", "Cursor unavailable for this authorization", []string{"移除 --cursor", "第一页", "--limit", "--connection", "核对授权"}, nil},
-		{"other_permission", "canvas assignments list", "PERMISSION_DENIED", "Capability is not authorized", []string{"capabilities list", "授权"}, []string{"移除 --cursor"}},
-		{"public_cursor", "public services list", "INVALID_ARGUMENT", "Directory cursor expired or does not match this query", []string{"移除 --cursor", "第一页", "--limit"}, nil},
-		{"query_audit", "canvas assignments list", "AUDIT_UNAVAILABLE", "Private result withheld because audit is unavailable", []string{"查询结果未发布", "审计存储", "重新查询"}, []string{"管理操作", "可能已生效", "auth status"}},
+		{"private_cursor", "learning canvas assignments list", "PERMISSION_DENIED", "Cursor unavailable for this authorization", []string{"移除 --cursor", "第一页", "--limit", "--connection", "核对授权"}, nil},
+		{"other_permission", "learning canvas assignments list", "PERMISSION_DENIED", "Capability is not authorized", []string{"capabilities list", "授权"}, []string{"移除 --cursor"}},
+		{"public_cursor", "campus websites list", "INVALID_ARGUMENT", "Directory cursor expired or does not match this query", []string{"移除 --cursor", "第一页", "--limit"}, nil},
+		{"query_audit", "learning canvas assignments list", "AUDIT_UNAVAILABLE", "Private result withheld because audit is unavailable", []string{"查询结果未发布", "审计存储", "重新查询"}, []string{"管理操作", "可能已生效", "auth status"}},
 		{"admin_audit", "auth remove", "AUDIT_UNAVAILABLE", "State committed; audit unavailable", []string{"管理操作可能已生效", "auth status", "再决定是否重试"}, []string{"查询结果未发布"}},
 		{"grant_audit", "permissions grant", "AUDIT_UNAVAILABLE", "State committed; audit unavailable", []string{"管理操作可能已生效", "auth status"}, []string{"查询结果未发布"}},
 	} {

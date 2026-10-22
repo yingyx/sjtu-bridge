@@ -17,7 +17,7 @@ func TestRemoteActivityScopedSchemaAndInvocation(t *testing.T) {
 	api := &remoteStub{capabilities: []contracts.Capability{c}}
 	ctx, session := connectRemote(t, api)
 	list, e := session.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 1 || list.Tools[0].Name != "development_activities_list" {
+	if e != nil || len(nativeTools(list.Tools)) != 1 || list.Tools[0].Name != "development_activities_list" {
 		t.Fatal("activity absent from authorized discovery", e)
 	}
 	b, _ := json.Marshal(list.Tools[0].InputSchema)
@@ -45,7 +45,7 @@ func TestRemoteElectricitySchemaBindsOneRoomAndFixedView(t *testing.T) {
 	api := &remoteStub{capabilities: []contracts.Capability{c}}
 	ctx, session := connectRemote(t, api)
 	list, e := session.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 1 || list.Tools[0].Name != "life_electricity_balance" {
+	if e != nil || len(nativeTools(list.Tools)) != 1 || list.Tools[0].Name != "life_electricity_balance" {
 		t.Fatal("electricity absent from authorized tools", e)
 	}
 	b, _ := json.Marshal(list.Tools[0].InputSchema)

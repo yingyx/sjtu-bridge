@@ -43,7 +43,7 @@ func TestIDSFiltersReachProviderThroughMCP(t *testing.T) {
 	}
 	defer session.Close()
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 1 || tools.Tools[0].Name != "learning_classrooms_available" || !tools.Tools[0].Annotations.ReadOnlyHint {
+	if err != nil || len(nativeTools(tools.Tools)) != 1 || tools.Tools[0].Name != "learning_classrooms_available" || !tools.Tools[0].Annotations.ReadOnlyHint {
 		t.Fatal(tools, err)
 	}
 	args := map[string]any{"building_id": "24", "date": "2026-10-21", "start_section": 2, "end_section": 4, "limit": 5}

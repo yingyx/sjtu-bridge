@@ -86,7 +86,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 		t.Fatal(e)
 	}
 	var out, diag bytes.Buffer
-	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+	if cli.Execute(ctx, []string{"learning", "canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal(diag.String())
 	}
 	var fromCLI contracts.AssignmentResponse
@@ -102,7 +102,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	for _, flags := range [][]string{{"--input-json-stdin"}, {"--input-file", inputPath}} {
 		out.Reset()
 		diag.Reset()
-		args := append([]string{"canvas", "assignments", "list", "--connection", path, "--json"}, flags...)
+		args := append([]string{"learning", "canvas", "assignments", "list", "--connection", path, "--json"}, flags...)
 		if cli.Execute(ctx, args, &out, &diag, bytes.NewReader(inputJSON)) != 0 || json.Unmarshal(out.Bytes(), &fromCLI) != nil || !reflect.DeepEqual(expected.Data, fromCLI.Data) {
 			t.Fatal("CLI JSON input differs from SDK", diag.String())
 		}
@@ -112,7 +112,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	unauthorizedJSON, _ := json.Marshal(unauthorized)
 	out.Reset()
 	diag.Reset()
-	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--input-json-stdin", "--json"}, &out, &diag, bytes.NewReader(unauthorizedJSON)) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "PERMISSION_DENIED") {
+	if cli.Execute(ctx, []string{"learning", "canvas", "assignments", "list", "--connection", path, "--input-json-stdin", "--json"}, &out, &diag, bytes.NewReader(unauthorizedJSON)) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "PERMISSION_DENIED") {
 		t.Fatal("JSON input escaped the grant", diag.String())
 	}
 	server, e := adapter.NewRemote(ctx, c)
@@ -132,8 +132,24 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	defer session.Close()
 	tools, e := session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+1 {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+3 {
 		t.Fatal("unexpected tools", e)
+	}
+	testConnectedServices(t, ctx, c, path, session, 1)
+	// A second authenticated app sees the same public task but receives no
+	// callable personal actions from the first app's grant.
+	otherPath := filepath.Join(d, "other.connection")
+	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "app_create", ClientID: "other", Path: otherPath}); e != nil {
+		t.Fatal(e)
+	}
+	other, e := client.Open(otherPath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer other.Close()
+	otherEntry, e := other.DescribeService(ctx, "canvas")
+	if e != nil || len(otherEntry.AvailableCapabilities) != 0 {
+		t.Fatal("service discovery crossed application grants", e)
 	}
 	publicInput := json.RawMessage(`{"limit":3}`)
 	publicRaw, e := c.Invoke(ctx, contracts.Invocation{Capability: "public.services.list", Input: publicInput})
@@ -143,7 +159,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	out.Reset()
 	diag.Reset()
-	if cli.Execute(ctx, []string{"public", "services", "list", "--connection", path, "--limit", "3", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+	if cli.Execute(ctx, []string{"campus", "websites", "list", "--connection", path, "--limit", "3", "--json"}, &out, &diag, strings.NewReader("")) != 0 {
 		t.Fatal("connected public CLI", diag.String())
 	}
 	var publicCLI contracts.Response
@@ -163,7 +179,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if json.Unmarshal(out.Bytes(), &cliCaps) != nil || !reflect.DeepEqual(expectedCLICaps, cliCaps) {
 		t.Fatal("CLI discovery differs from SDK")
 	}
-	publicResult, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{"limit": 3}})
+	publicResult, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "campus_websites_list", Arguments: map[string]any{"limit": 3}})
 	if e != nil || publicResult.IsError {
 		t.Fatal("MCP public query", e)
 	}
@@ -196,7 +212,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if json.Unmarshal(navMCPRaw, &navMCP) != nil || !reflect.DeepEqual(navSDK.Data, navMCP.Data) {
 		t.Fatal("MCP navigation differs from SDK")
 	}
-	result, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "canvas_assignments_list", Arguments: q})
+	result, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: q})
 	if e != nil || result.IsError {
 		t.Fatal("MCP query", e)
 	}
@@ -209,12 +225,14 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "grant_revoke", ClientID: "b"}); e != nil {
 		t.Fatal(e)
 	}
-	result, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "canvas_assignments_list", Arguments: q})
+	result, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: q})
 	if e != nil || !result.IsError {
 		t.Fatal("stale MCP call survived revoke", e)
 	}
+	// Generic discovery must refresh even without an intervening tools/list.
+	testConnectedServices(t, ctx, c, path, session, 0)
 	tools, e = session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities()) {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+2 {
 		t.Fatal("revoked tool discovery", e)
 	}
 	caps, e = c.Capabilities(ctx)
@@ -229,11 +247,26 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	out.Reset()
 	diag.Reset()
-	if cli.Execute(ctx, []string{"canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10"}, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "PERMISSION_DENIED") {
+	if cli.Execute(ctx, []string{"learning", "canvas", "assignments", "list", "--connection", path, "--account", q.AccountRef, "--course", q.CourseRef, "--view", q.View, "--limit", "10"}, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "PERMISSION_DENIED") {
 		t.Fatal("CLI revoke bypass")
 	}
 	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "app_revoke", ClientID: "b"}); e != nil {
 		t.Fatal(e)
+	}
+	if _, e = c.Services(ctx, contracts.ServiceFilter{}); e == nil {
+		t.Fatal("revoked SDK app discovered services")
+	}
+	if _, e = c.DescribeService(ctx, "canvas"); e == nil {
+		t.Fatal("revoked SDK app described services")
+	}
+	for _, params := range []*sdk.CallToolParams{
+		{Name: "services_search", Arguments: map[string]any{"query": "Canvas"}},
+		{Name: "services_describe", Arguments: map[string]any{"id": "canvas"}},
+	} {
+		got, err := session.CallTool(ctx, params)
+		if err == nil && !got.IsError {
+			t.Fatal("revoked MCP app used service discovery")
+		}
 	}
 	if _, e = c.Invoke(ctx, contracts.Invocation{Capability: "development.activities.navigate"}); e == nil {
 		t.Fatal("revoked application retained navigation access through its connection")
@@ -247,17 +280,58 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if _, e = session.ListTools(ctx, nil); e == nil {
 		t.Fatal("revoked MCP app discovered public tools")
 	}
-	publicResult, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{"limit": 3}})
+	publicResult, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "campus_websites_list", Arguments: map[string]any{"limit": 3}})
 	if e == nil && !publicResult.IsError {
 		t.Fatal("revoked MCP app invoked public tool")
 	}
 	for _, conn := range []string{path, filepath.Join(d, "absent.connection")} {
-		for _, args := range [][]string{{"capabilities", "list", "--connection", conn, "--json"}, {"public", "services", "list", "--connection", conn, "--json"}} {
+		for _, args := range [][]string{{"capabilities", "list", "--connection", conn, "--json"}, {"campus", "websites", "list", "--connection", conn, "--json"}, {"services", "search", "Canvas", "--connection", conn, "--json"}, {"services", "describe", "canvas", "--connection", conn, "--json"}} {
 			out.Reset()
 			diag.Reset()
 			if cli.Execute(ctx, args, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "CLIENT_UNAUTHORIZED") {
 				t.Fatal("invalid CLI connection fell back to public", diag.String())
 			}
+		}
+	}
+}
+
+func testConnectedServices(t *testing.T, ctx context.Context, c *client.Client, path string, session *sdk.ClientSession, actions int) {
+	t.Helper()
+	entry, err := c.DescribeService(ctx, "canvas")
+	if err != nil || len(entry.AvailableCapabilities) != actions || len(entry.SupportedCapabilityIDs) == 0 || len(entry.Destinations) == 0 {
+		t.Fatal("SDK task discovery disagrees with current grant", err)
+	}
+	page, err := c.Services(ctx, contracts.ServiceFilter{Query: "Canvas"})
+	if err != nil || len(page.Items) == 0 {
+		t.Fatal("SDK task search", err)
+	}
+	for _, check := range []struct {
+		args     []string
+		tool     string
+		input    map[string]any
+		expected any
+	}{
+		{[]string{"services", "describe", entry.ID}, "services_describe", map[string]any{"id": entry.ID}, entry},
+		{[]string{"services", "search", "Canvas"}, "services_search", map[string]any{"query": "Canvas"}, page},
+	} {
+		expected, _ := json.Marshal(check.expected)
+		var out, diag bytes.Buffer
+		args := append(check.args, "--connection", path, "--json")
+		if cli.Execute(ctx, args, &out, &diag, strings.NewReader("")) != 0 {
+			t.Fatal("connected CLI services", diag.String())
+		}
+		cliJSON := strings.ReplaceAll(out.String(), " --connection CONNECTION_FILE", "")
+		var want, actual any
+		if json.Unmarshal(expected, &want) != nil || json.Unmarshal([]byte(cliJSON), &actual) != nil || !reflect.DeepEqual(want, actual) {
+			t.Fatal("CLI services differ from SDK")
+		}
+		result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: check.tool, Arguments: check.input})
+		if err != nil || result.IsError {
+			t.Fatal("connected MCP services", err, result)
+		}
+		raw, _ := json.Marshal(result.StructuredContent)
+		if json.Unmarshal(raw, &actual) != nil || !reflect.DeepEqual(want, actual) {
+			t.Fatal("MCP services differ from SDK")
 		}
 	}
 }

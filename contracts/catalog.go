@@ -191,8 +191,8 @@ func publicQuery(id, title, category, group, service string, aliases []string, d
 }
 
 func cloneCapability(c Capability) Capability {
-	c.CLICommand = "sjtu " + strings.ReplaceAll(c.ID, ".", " ")
-	c.MCPTool = strings.ReplaceAll(c.ID, ".", "_")
+	c.CLICommand = "sjtu " + strings.Join(CLIPath(c.ID), " ")
+	c.MCPTool = MCPToolName(c.ID)
 	c.Aliases = append([]string(nil), c.Aliases...)
 	c.Keywords = append([]string(nil), c.Keywords...)
 	c.Effects = append([]Effect(nil), c.Effects...)

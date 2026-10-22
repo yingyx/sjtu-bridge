@@ -30,7 +30,7 @@ func discover(ctx context.Context, profile, connection string) ([]contracts.Capa
 }
 
 func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *string, jsonOutput, verbose *bool) {
-	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "按任务查找当前可调用的校园能力", Long: "先用 search 查找任务，再用 describe 查看参数和调用示例。\n使用 --connection 加入应用获准的个人能力；--verbose 查看完整契约。"}
+	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "查看当前可调用能力的技术契约", Long: "先用 search 查找任务，再用 describe 查看参数和调用示例。\n使用 --connection 加入应用获准的个人能力；--verbose 查看完整契约。"}
 	for _, verb := range []string{"list", "search"} {
 		filter := contracts.CapabilityFilter{}
 		use, short, args := "list", "列出能力摘要，可按分类和服务筛选", cobra.NoArgs

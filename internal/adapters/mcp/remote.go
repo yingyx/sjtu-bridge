@@ -23,11 +23,13 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 	var mu sync.Mutex
 	last := ""
 	var registered []string
+	var snapshot []contracts.Capability
 	// The caller holds mu so a failed refresh cannot leave earlier tools behind.
 	clear := func() {
 		server.RemoveTools(registered...)
 		registered = nil
 		last = ""
+		snapshot = nil
 	}
 	refresh := func(ctx context.Context) error {
 		caps, e := api.Capabilities(ctx)
@@ -70,6 +72,7 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 			})
 			registered = append(registered, tool.Name)
 		}
+		snapshot = caps
 		last = string(encoded)
 		return nil
 	}
@@ -79,6 +82,14 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	addServiceTools(server, func(ctx context.Context) ([]contracts.Capability, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if e := refresh(ctx); e != nil {
+			return nil, e
+		}
+		return append([]contracts.Capability(nil), snapshot...), nil
+	})
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, r sdk.Request) (sdk.Result, error) {
 			if method == "tools/list" {

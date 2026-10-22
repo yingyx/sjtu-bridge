@@ -68,10 +68,10 @@ func TestAdaptersRejectUnexecutableMetadata(t *testing.T) {
 				}
 				defer session.Close()
 				listed, err := session.ListTools(ctx, nil)
-				if err != nil || len(listed.Tools) != 0 {
+				if err != nil || len(nativeTools(listed.Tools)) != 0 {
 					t.Fatal("unexecutable capability was advertised", listed, err)
 				}
-				for _, tool := range []string{"public_services_list", "public_unreviewed_list", "prepare", "approve", "execute"} {
+				for _, tool := range []string{"campus_websites_list", "public_unreviewed_list", "prepare", "approve", "execute"} {
 					if _, err := session.CallTool(ctx, &sdk.CallToolParams{Name: tool, Arguments: map[string]any{}}); err == nil {
 						t.Fatal("unimplemented execution tool accepted", tool)
 					}

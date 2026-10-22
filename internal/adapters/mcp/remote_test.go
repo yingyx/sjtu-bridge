@@ -98,6 +98,7 @@ func connectRemote(t *testing.T, api *remoteStub) (context.Context, *sdk.ClientS
 }
 
 func toolNames(tools []*sdk.Tool) []string {
+	tools = nativeTools(tools)
 	names := make([]string, len(tools))
 	for i, tool := range tools {
 		names[i] = tool.Name
@@ -117,11 +118,11 @@ func TestRemoteMixedCatalogMetadataAndDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"canvas_assignments_list", "public_calendars_list", "public_notices_list", "public_services_list"}
+	want := []string{"campus_websites_list", "learning_calendars_list", "learning_canvas_assignments_list", "learning_notices_list"}
 	if got := toolNames(listed.Tools); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool catalog = %v, want %v", got, want)
 	}
-	for _, tool := range listed.Tools {
+	for _, tool := range nativeTools(listed.Tools) {
 		if tool.Title != "查询校园信息" || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("missing title or read-only hint: %+v", tool)
 		}
@@ -130,7 +131,7 @@ func TestRemoteMixedCatalogMetadataAndDispatch(t *testing.T) {
 				t.Fatalf("%s missing discovery metadata %q: %s", tool.Name, text, tool.Description)
 			}
 		}
-		if tool.Name == "canvas_assignments_list" {
+		if tool.Name == "learning_canvas_assignments_list" {
 			if !strings.Contains(tool.Description, "Canvas") || !strings.Contains(tool.Description, "数据分类：personal") || !strings.Contains(tool.Description, "执行规则：grant") {
 				t.Fatal("personal safety metadata absent", tool.Description)
 			}
@@ -139,7 +140,7 @@ func TestRemoteMixedCatalogMetadataAndDispatch(t *testing.T) {
 		}
 	}
 	for _, capability := range caps {
-		name := strings.ReplaceAll(capability.ID, ".", "_")
+		name := contracts.MCPToolName(capability.ID)
 		result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: map[string]any{"limit": 2}})
 		if err != nil || result.IsError {
 			t.Fatalf("%s: %v, %v", name, result, err)
@@ -194,10 +195,10 @@ func TestRemoteRefreshRemovesPublicAndPersonalTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names := toolNames(listed.Tools); !reflect.DeepEqual(names, []string{"public_services_list"}) || listed.Tools[0].Title != remaining.Title {
+	if names := toolNames(listed.Tools); !reflect.DeepEqual(names, []string{"campus_websites_list"}) || listed.Tools[0].Title != remaining.Title {
 		t.Fatalf("catalog was not replaced: %+v", listed.Tools)
 	}
-	for _, name := range []string{"public_calendars_list", "public_notices_list", "canvas_assignments_list"} {
+	for _, name := range []string{"learning_calendars_list", "learning_notices_list", "learning_canvas_assignments_list"} {
 		if _, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: map[string]any{}}); err == nil {
 			t.Fatalf("removed tool %s remains callable", name)
 		}
@@ -221,7 +222,7 @@ func TestRemoteDiscoveryFailureClearsAllToolsAndCanRecover(t *testing.T) {
 				t.Fatalf("discovery must fail explicitly and safely: %v", err)
 			}
 			for _, capability := range remoteCapabilities() {
-				name := strings.ReplaceAll(capability.ID, ".", "_")
+				name := contracts.MCPToolName(capability.ID)
 				if _, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: map[string]any{}}); err == nil {
 					t.Fatalf("failed discovery retained %s", name)
 				}
@@ -234,7 +235,7 @@ func TestRemoteDiscoveryFailureClearsAllToolsAndCanRecover(t *testing.T) {
 				t.Fatal("stale tools reached Broker after discovery failure")
 			}
 			listed, err := session.ListTools(ctx, nil)
-			if err != nil || len(listed.Tools) != 4 {
+			if err != nil || len(nativeTools(listed.Tools)) != 4 {
 				t.Fatalf("catalog did not recover after successful authentication: %v / %v", listed, err)
 			}
 		})
@@ -261,7 +262,7 @@ func TestRemoteRefreshAddsNewServiceWithoutAdapterChanges(t *testing.T) {
 	api.capabilities = append(api.capabilities, additional)
 	api.mu.Unlock()
 	listed, err := session.ListTools(ctx, nil)
-	if err != nil || !reflect.DeepEqual(toolNames(listed.Tools), []string{"library_borrowing_list", "public_services_list"}) {
+	if err != nil || !reflect.DeepEqual(toolNames(listed.Tools), []string{"campus_websites_list", "library_borrowing_list"}) {
 		t.Fatalf("new service not discovered: %v / %v", listed, err)
 	}
 	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "library_borrowing_list", Arguments: map[string]any{}})
@@ -273,7 +274,7 @@ func TestRemoteRefreshAddsNewServiceWithoutAdapterChanges(t *testing.T) {
 func TestRemoteInvocationIsReauthorizedWithoutDiscovery(t *testing.T) {
 	api := &remoteStub{capabilities: remoteCapabilities()}
 	ctx, session := connectRemote(t, api)
-	params := &sdk.CallToolParams{Name: "canvas_assignments_list", Arguments: map[string]any{}}
+	params := &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: map[string]any{}}
 	if result, err := session.CallTool(ctx, params); err != nil || result.IsError {
 		t.Fatal(result, err)
 	}
@@ -296,12 +297,12 @@ func TestRemoteInvocationConnectionFailureClearsAllTools(t *testing.T) {
 		t.Run(code, func(t *testing.T) {
 			api := &remoteStub{capabilities: remoteCapabilities(), invokeErr: contracts.Fail(code, "连接无效")}
 			ctx, session := connectRemote(t, api)
-			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "canvas_assignments_list", Arguments: map[string]any{}})
+			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: map[string]any{}})
 			if err != nil || !result.IsError {
 				t.Fatal(result, err)
 			}
 			for _, capability := range remoteCapabilities() {
-				name := strings.ReplaceAll(capability.ID, ".", "_")
+				name := contracts.MCPToolName(capability.ID)
 				if _, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: map[string]any{}}); err == nil {
 					t.Fatalf("connection failure retained %s", name)
 				}
@@ -315,7 +316,7 @@ func TestRemoteRejectsNonObjectResponses(t *testing.T) {
 		t.Run(response, func(t *testing.T) {
 			api := &remoteStub{capabilities: remoteCapabilities(), response: json.RawMessage(response)}
 			ctx, session := connectRemote(t, api)
-			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{}})
+			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "campus_websites_list", Arguments: map[string]any{}})
 			if err != nil || !result.IsError || result.StructuredContent != nil {
 				t.Fatalf("invalid Broker response leaked as success: %v / %v", result, err)
 			}

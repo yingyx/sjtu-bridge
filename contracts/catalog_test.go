@@ -96,7 +96,7 @@ func TestCatalogSummaryAndDetailIsolation(t *testing.T) {
 	if len(c.InputSchema) == 0 || len(c.OutputSchema) == 0 || !strings.Contains(string(c.InputSchema), "canvas:course:1") || strings.Contains(string(c.InputSchema), "canvas:course:2") {
 		t.Fatal("grant detail was damaged")
 	}
-	if summaries[0].CLICommand != "sjtu canvas assignments list" || summaries[0].MCPTool != "canvas_assignments_list" {
+	if summaries[0].CLICommand != "sjtu learning canvas assignments list" || summaries[0].MCPTool != "learning_canvas_assignments_list" {
 		t.Fatal("missing invocation mapping")
 	}
 	for _, absent := range []string{"aliases", "keywords", "authorized", "credentials", "effects", "execution_rule", "provider", "contract_version"} {

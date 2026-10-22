@@ -15,7 +15,7 @@ func TestPrivateHelpHasOnlyRelevantViewsAndLimits(t *testing.T) {
 	for _, test := range []struct {
 		path, view, limit, reference string
 	}{
-		{"canvas assignments list", "deadlines_v1", "1–100", "course_ref"},
+		{"learning canvas assignments list", "deadlines_v1", "1–100", "course_ref"},
 		{"learning timetable list", "schedule_v1", "1–100", "resource_ref"},
 		{"digital mail list", "headers_v1", "1–50", "resource_ref"},
 		{"development activities list", "summaries_v1", "1–20", "resource_ref"},
@@ -41,7 +41,7 @@ func TestPrivateHelpHasOnlyRelevantViewsAndLimits(t *testing.T) {
 }
 
 func TestPrivateCommandsExplainMissingConnectionBeforeReadingInput(t *testing.T) {
-	for _, path := range []string{"canvas assignments list", "learning timetable list", "digital mail list", "development activities list", "life electricity balance"} {
+	for _, path := range []string{"learning canvas assignments list", "learning timetable list", "digital mail list", "development activities list", "life electricity balance"} {
 		var out, diag bytes.Buffer
 		args := append(strings.Fields(path), "--input-json-stdin", "--json")
 		if code := Execute(context.Background(), args, &out, &diag, strings.NewReader("not JSON")); code == 0 || out.Len() != 0 {
@@ -66,11 +66,11 @@ func TestPrivateInputsValidateBeforeOpeningConnection(t *testing.T) {
 		input    string
 		fragment string
 	}{
-		{"canvas assignments list", nil, "", "--account"},
+		{"learning canvas assignments list", nil, "", "--account"},
 		{"digital mail list", []string{"--account", "synthetic", "--resource", "mail:folder:inbox", "--view", "schedule_v1"}, "", "headers_v1"},
 		{"life electricity balance", []string{"--account", "synthetic", "--resource", "electric:room:1", "--view", "balance_v1", "--limit", "2"}, "", "--limit"},
 		{"learning timetable list", []string{"--input-json-stdin", "--limit", "1"}, `{}`, "一种输入方式"},
-		{"canvas assignments list", []string{"--input-json-stdin"}, `{"account":"synthetic","course_ref":"synthetic-course","view":"deadlines_v1","limit":2}`, "account"},
+		{"learning canvas assignments list", []string{"--input-json-stdin"}, `{"account":"synthetic","course_ref":"synthetic-course","view":"deadlines_v1","limit":2}`, "account"},
 		{"development activities list", []string{"--input-json-stdin"}, `{"account_ref":"synthetic","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":21}`, "limit"},
 	} {
 		t.Run(test.path+test.fragment, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestPrivateInputsValidateBeforeOpeningConnection(t *testing.T) {
 
 func TestPrivateJSONInputReachesConnectionCheck(t *testing.T) {
 	for _, test := range []struct{ path, input string }{
-		{"canvas assignments list", `{"account_ref":"synthetic","course_ref":"synthetic-course","view":"deadlines_v1","limit":2}`},
+		{"learning canvas assignments list", `{"account_ref":"synthetic","course_ref":"synthetic-course","view":"deadlines_v1","limit":2}`},
 		{"learning timetable list", `{"account_ref":"synthetic","resource_ref":"teaching:term:2026:1","view":"schedule_v1","limit":2}`},
 		{"digital mail list", `{"account_ref":"synthetic","resource_ref":"mail:folder:inbox","view":"headers_v1","limit":2,"query":"通知"}`},
 		{"development activities list", `{"account_ref":"synthetic","resource_ref":"activity:feed:visible","view":"summaries_v1","limit":2}`},

@@ -25,10 +25,12 @@ type TaskPath struct {
 // Navigation routes an intent to an official destination. It contains no
 // copied workflow, eligibility rule, price, or claim of live availability.
 type Navigation struct {
-	Purpose             string             `json:"purpose"`
-	Primary             TaskPath           `json:"primary"`
-	CrossListings       []TaskPath         `json:"cross_listings"`
-	DestinationKind     string             `json:"destination_kind"`
+	Purpose         string     `json:"purpose"`
+	Primary         TaskPath   `json:"primary"`
+	CrossListings   []TaskPath `json:"cross_listings"`
+	DestinationKind string     `json:"destination_kind"`
+	// RelatedCapabilities are static support references, not authorized actions.
+	// The service directory projects AvailableCapabilities from the caller's catalog.
 	RelatedCapabilities []string           `json:"related_capabilities"`
 	Sources             []NavigationSource `json:"sources"`
 	VerifiedAt          string             `json:"verified_at"`

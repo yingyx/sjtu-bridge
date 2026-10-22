@@ -71,6 +71,22 @@ func TestPrivateTextAndEmptyResults(t *testing.T) {
 	}
 }
 
+func TestUnavailableSecondClassModuleRemainsVisibleInTextAndJSON(t *testing.T) {
+	r := contracts.CampusResponse{SchemaVersion: "1", Data: contracts.CampusData{Items: []contracts.CampusRecord{}}, Meta: contracts.PageMeta{Provider: "dekt", Coverage: "own_secondclass_honors_only", UnavailableModules: []string{"outstanding_graduate"}}}
+	for _, asJSON := range []bool{false, true} {
+		var out, diag bytes.Buffer
+		if err := writeResult(&out, &diag, r, asJSON, false); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "outstanding_graduate") {
+			t.Fatal("missing source availability")
+		}
+		if !asJSON && (!strings.Contains(out.String(), "部分覆盖") || strings.Contains(out.String(), "当前查询无匹配结果")) {
+			t.Fatal("partial source presented as an empty complete query")
+		}
+	}
+}
+
 func TestNavigationDefaultAndVerbose(t *testing.T) {
 	for _, verbose := range []bool{false, true} {
 		var out, diag bytes.Buffer

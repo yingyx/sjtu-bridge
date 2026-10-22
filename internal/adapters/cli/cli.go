@@ -24,7 +24,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	jsonOutput := false
 	verbose := false
 	connection := ""
-	root := &cobra.Command{Use: "sjtu", Short: "SJTU Bridge：按应用授权的校园服务接入层", Long: "SJTU Bridge：按应用授权的校园服务接入层。\n\n先用 capabilities list/search 发现任务，再用 describe 查看参数与限制。\n应用使用 --connection 指定自己的连接文件；凭据导入和授权由用户管理命令完成。", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "sjtu", Short: "SJTU Bridge：按应用授权的校园服务接入层", Long: "SJTU Bridge：按应用授权的校园服务接入层。\n\n先用 services list/search 发现事项，再用 services describe 查看范围、官网入口与当前可调用动作。\ncapabilities describe 查看具体能力的参数与限制。应用使用 --connection 指定自己的连接文件。", SilenceUsage: true, SilenceErrors: true}
 	root.SetOut(out)
 	root.SetErr(diagnostics)
 	root.SetIn(input)
@@ -35,7 +35,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 		return nil
 	}
 	root.AddGroup(
-		&cobra.Group{ID: "discovery", Title: "能力发现："},
+		&cobra.Group{ID: "discovery", Title: "事项与能力发现："},
 		&cobra.Group{ID: "services", Title: "校园服务："},
 		&cobra.Group{ID: "management", Title: "用户管理："},
 		&cobra.Group{ID: "runtime", Title: "接入与诊断："},
@@ -58,34 +58,22 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 		}
 	}
 	addDiscovery(root, out, &profile, &connection, &jsonOutput, &verbose)
+	addServiceDiscovery(root, out, &profile, &connection, &jsonOutput, &verbose)
 	root.AddCommand(&cobra.Command{Use: "doctor", GroupID: "runtime", Short: "离线实现状态与诊断（不探测校园网站）", Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
-		return writeResult(out, diagnostics, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_assignments_read_only", "jaccount": "portal_specific_identity_required", "teaching": "broker_timetable_read_only", "sjtumail": "broker_inbox_headers_read_only", "activity": "broker_visible_summaries_read_only", "electric": "broker_bound_room_balance_read_only", "ids": "anonymous_teaching_rooms_and_public_services", "campusfeed": "anonymous_rss_and_dining_queries"}, "capabilities": len(api.Capabilities())}, jsonOutput, verbose)
+		return writeResult(out, diagnostics, map[string]any{"version": "0.3.0", "profile": profile, "network_probed": false, "credential_store": "broker_system_keyring_aes_gcm", "providers": map[string]string{"publicinfo": "implemented", "servicenav": "bundled_navigation_only", "campuspublic": "anonymous_source_page_queries", "canvas": "broker_course_scoped_learning_read_only", "jaccount": "portal_specific_identity_required", "teaching": "broker_timetable_read_only", "sjtumail": "broker_inbox_headers_read_only", "activity": "broker_activity_discovery_calendar_and_own_records_read_only", "dekt": "broker_secondclass_fixed_records_read_only", "electric": "broker_bound_room_balance_and_daily_usage_read_only", "bath": "broker_bound_building_and_own_consumption_read_only", "jcourse": "broker_user_api_key_community_read_only", "ids": "anonymous_teaching_rooms_and_public_services", "campusfeed": "anonymous_rss_and_dining_queries"}, "capabilities": len(api.Capabilities())}, jsonOutput, verbose)
 	})})
 	registry, err := bridge.New(bridge.Options{})
 	if err != nil {
 		panic(err)
 	}
 	defer registry.Close()
-	groups := map[string]*cobra.Command{}
-	resources := map[string]*cobra.Command{}
 	for _, c := range registry.Capabilities() {
-		parts := strings.Split(c.ID, ".")
-		group := groups[parts[0]]
-		if group == nil {
-			group = &cobra.Command{Use: parts[0], GroupID: "services", Short: c.CategoryLabel + "公开查询与服务导航"}
-			groups[parts[0]] = group
-			root.AddCommand(group)
-		}
-		resource := resources[parts[0]+"."+parts[1]]
-		if resource == nil {
-			resource = &cobra.Command{Use: parts[1]}
-			resources[parts[0]+"."+parts[1]] = resource
-			group.AddCommand(resource)
-		}
+		parts := contracts.CLIPath(c.ID)
+		resource := ensureCommandPath(root, parts[:len(parts)-1], c.CategoryLabel+"公开查询与服务导航")
 		var jsonInput *jsonInputOptions
 		var publicInput *contracts.ListInput
 		var businessFlags []string
-		command := &cobra.Command{Use: parts[2], Short: c.Title, Long: c.Description, Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
+		command := &cobra.Command{Use: parts[len(parts)-1], Short: c.Title, Long: c.Description, Args: cobra.NoArgs, RunE: withEngine(func(cmd *cobra.Command, api *bridge.Engine) error {
 			raw, err := jsonInput.read(cmd, input, publicInput, businessFlags, c.InputSchema)
 			if err != nil {
 				return err
@@ -145,6 +133,22 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	completeCommandHelp(root)
 	configureCommandErrors(root)
 	return root
+}
+
+func ensureCommandPath(root *cobra.Command, path []string, short string) *cobra.Command {
+	parent := root
+	for _, name := range path {
+		child := findCommand(parent, name)
+		if child == nil {
+			child = &cobra.Command{Use: name}
+			if parent == root {
+				child.GroupID, child.Short = "services", short
+			}
+			parent.AddCommand(child)
+		}
+		parent = child
+	}
+	return parent
 }
 
 func Execute(ctx context.Context, args []string, out, diagnostics io.Writer, input io.Reader) int {

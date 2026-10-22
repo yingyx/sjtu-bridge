@@ -29,7 +29,7 @@ func TestEntrypointParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, diagnostics bytes.Buffer
-	if cli.Execute(ctx, []string{"public", "services", "list", "--json"}, &out, &diagnostics, strings.NewReader("")) != 0 {
+	if cli.Execute(ctx, []string{"campus", "websites", "list", "--json"}, &out, &diagnostics, strings.NewReader("")) != 0 {
 		t.Fatal(diagnostics.String())
 	}
 	var fromCLI contracts.Response
@@ -55,7 +55,7 @@ func TestEntrypointParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != len(api.Capabilities()) {
+	if len(nativeTools(tools.Tools)) != len(api.Capabilities()) {
 		t.Fatal(tools)
 	}
 	for _, tool := range tools.Tools {
@@ -63,7 +63,7 @@ func TestEntrypointParity(t *testing.T) {
 			t.Fatal(tool)
 		}
 	}
-	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{"limit": 10}})
+	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "campus_websites_list", Arguments: map[string]any{"limit": 10}})
 	if err != nil || result.IsError {
 		t.Fatal(result, err)
 	}
@@ -78,7 +78,7 @@ func TestEntrypointParity(t *testing.T) {
 	if !reflect.DeepEqual(expected.Data, fromMCP.Data) {
 		t.Fatal("MCP and API results differ")
 	}
-	denied, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "public_services_list", Arguments: map[string]any{"profile": "admin"}})
+	denied, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "campus_websites_list", Arguments: map[string]any{"profile": "admin"}})
 	if err != nil || !denied.IsError {
 		t.Fatal("profile escalation was not rejected", denied, err)
 	}

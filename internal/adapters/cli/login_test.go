@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -132,5 +133,72 @@ func TestPortalLoginFailureDoesNotGuessCommitOrAuthenticationState(t *testing.T)
 	}
 	if err := loginResultsError([]portalLoginResult{{Status: "imported", StateCommitted: true}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDektLoginProviderAndReuseStayExplicit(t *testing.T) {
+	if !campusCredentialProvider("dekt") || campusCredentialProvider("dektcjd") {
+		t.Fatal("reviewed dekt provider alias changed")
+	}
+	raw := []byte(`{"credentials":{"source":{"provider":"teaching","kind":"JAAuthCookie","active":true}}}`)
+	got, e := reuseLoginTargets(raw, "source", []string{"activity", "dekt"}, true)
+	if e != nil || !reflect.DeepEqual(got, []string{"activity", "dekt"}) {
+		t.Fatal("explicit distinct portal targets unavailable", e)
+	}
+	raw = []byte(`{"credentials":{"source":{"provider":"dekt","kind":"JAAuthCookie","active":true}}}`)
+	if _, e = reuseLoginTargets(raw, "source", []string{"dekt"}, true); e == nil || loginErrorCode(e) != "INVALID_ARGUMENT" {
+		t.Fatal("source reused as its own portal target")
+	}
+	got, e = reuseLoginTargets(raw, "source", []string{"teaching", "sjtumail"}, false)
+	if e != nil || !reflect.DeepEqual(got, []string{"teaching", "sjtumail"}) {
+		t.Fatal("dekt source silently changed default target portals", e)
+	}
+}
+
+func TestBathLoginProviderAndReuseStayExplicit(t *testing.T) {
+	if !campusCredentialProvider("bath") {
+		t.Fatal("reviewed bath provider unavailable")
+	}
+	raw := []byte(`{"credentials":{"source":{"provider":"teaching","kind":"JAAuthCookie","active":true}}}`)
+	got, err := reuseLoginTargets(raw, "source", []string{"bath"}, true)
+	if err != nil || !reflect.DeepEqual(got, []string{"bath"}) {
+		t.Fatal("explicit bath target unavailable", err)
+	}
+	raw = []byte(`{"credentials":{"source":{"provider":"bath","kind":"JAAuthCookie","active":true}}}`)
+	if _, err := reuseLoginTargets(raw, "source", []string{"bath"}, true); err == nil || loginErrorCode(err) != "INVALID_ARGUMENT" {
+		t.Fatal("bath source reused as its own portal target")
+	}
+	got, err = reuseLoginTargets(raw, "source", []string{"teaching", "sjtumail"}, false)
+	if err != nil || !reflect.DeepEqual(got, []string{"teaching", "sjtumail"}) {
+		t.Fatal("bath source changed default target portals", err)
+	}
+}
+
+func TestCampusLoginAcceptsAllReviewedPortalsBeforeTerminalCheck(t *testing.T) {
+	for _, test := range []struct {
+		name, providers, code string
+	}{
+		{"all_six", "teaching,sjtumail,activity,dekt,electric,bath", "AUTH_REQUIRED"},
+		{"bath", "bath", "AUTH_REQUIRED"},
+		{"duplicate", "bath,bath", "INVALID_ARGUMENT"},
+		{"unknown", "unknown", "INVALID_ARGUMENT"},
+		{"too_many", "teaching,sjtumail,activity,dekt,electric,bath,unknown", "INVALID_ARGUMENT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var out, diag bytes.Buffer
+			jsonOutput, verbose := false, false
+			cmd := campusLoginCommand(&out, &diag, strings.NewReader(""), &jsonOutput, &verbose)
+			if err := cmd.Flags().Set("providers", test.providers); err != nil {
+				t.Fatal(err)
+			}
+			// Synthetic nonterminal input stops before Broker access or QR login.
+			err := cmd.RunE(cmd, nil)
+			if err == nil || loginErrorCode(err) != test.code {
+				t.Fatalf("got %v, want %s", err, test.code)
+			}
+			if test.name == "unknown" && !strings.Contains(err.Error(), "bath") {
+				t.Fatal("provider guidance omits bath")
+			}
+		})
 	}
 }

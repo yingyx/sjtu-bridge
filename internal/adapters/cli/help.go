@@ -25,24 +25,27 @@ func addBusinessExample(command *cobra.Command, capability contracts.Capability)
 
 func completeCommandHelp(root *cobra.Command) {
 	resourceDescriptions := map[string]string{
-		"calendars": "校历索引", "notices": "公告索引与正文", "services": "校园网站目录", "classrooms": "教室目录、设施与单日排课",
+		"calendars": "校历索引", "notices": "公告索引与正文", "websites": "校园网站目录", "classrooms": "教室目录、设施与单日排课",
 		"courses": "课程查询", "practice": "实践修业与达标", "semester": "学期与上课节次", "timetable": "本人课表",
 		"borrowing": "借阅规则与条件", "loans": "个人借阅入口", "spaces": "图书馆空间入口", "dining": "食堂与用餐时段数据",
 		"health": "校医院公告", "lostfound": "失物招领", "sports": "体育场馆入口", "utilities": "宿舍生活入口", "electricity": "本人宿舍电量",
 		"activities": "校园活动", "network": "校园网络入口", "software": "正版软件目录与入口", "support": "网络支持信息", "mail": "本人收件箱标题",
 		"fees": "收费公示", "payments": "缴费入口", "buildings": "教学建筑与楼层", "contacts": "教学楼办公联系", "maps": "校园地图入口",
 		"organizations": "学校机构目录", "computing": "科研计算入口", "hardware": "计算硬件信息", "assignments": "Canvas 作业与截止时间",
+		"canvas": "Canvas 学习任务与作业查询", "ids": "IDS 教学服务", "secondclass": "本人第二课堂记录",
+		"submissions": "本人作业提交状态", "announcements": "课程公告", "modules": "学习模块与条目", "pages": "课程页面",
+		"files": "课程文件元数据", "folders": "课程文件夹", "quizzes": "测验安排与说明", "calendar": "课程日历", "todo": "课程待办", "discussions": "课程讨论主题",
 		"serve": "通过标准输入输出提供 MCP 服务",
 	}
-	for _, group := range root.Commands() {
-		if group.Name() == "public" {
-			group.Short = "公开校历、教务公告与校园网站目录"
-		}
-		group.Short = strings.ReplaceAll(group.Short, "公开查询与服务导航", "查询与服务导航")
-		for _, child := range group.Commands() {
+	var complete func(*cobra.Command)
+	complete = func(parent *cobra.Command) {
+		for _, child := range parent.Commands() {
+			child.Short = strings.ReplaceAll(child.Short, "公开查询与服务导航", "查询与服务导航")
 			if child.Short == "" {
 				child.Short = resourceDescriptions[child.Name()]
 			}
+			complete(child)
 		}
 	}
+	complete(root)
 }
