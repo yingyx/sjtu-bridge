@@ -89,6 +89,9 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 	if inv.Capability == contracts.ElectricityBalanceCapability && (len(page.Rows) != 1 || page.Next != "") {
 		return contracts.Fail("UPSTREAM_CHANGED", "Electricity balance must include exactly the bound room")
 	}
+	if inv.Capability == contracts.PanQuotaCapability && len(page.Rows) != 1 {
+		return contracts.Fail("UPSTREAM_CHANGED", "Pan quota must include the bound personal space state")
+	}
 	unavailable, e := campusUnavailableModules(inv.Capability, page.UnavailableModules)
 	if e != nil {
 		return e
@@ -147,6 +150,17 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 			row.RemainingKWh, row.SubsidyKWh = r.RemainingKWh, r.SubsidyKWh
 		} else if contracts.JCourseOperation(inv.Capability) != "" {
 			row, e = projectCommunity(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
+		} else if inv.Capability == contracts.PanQuotaCapability {
+			if r.Ref != contracts.PanQuotaResource || r.Title == "" || !contracts.ValidPanQuota(r.Pan) {
+				return contracts.Fail("UPSTREAM_CHANGED", "Invalid fixed Pan quota view")
+			}
+			quota := *r.Pan
+			row.Pan = &quota
+		} else if inv.Capability == contracts.ShuiyuanSearchCapability {
+			row, e = projectShuiyuan(q, r)
 			if e != nil {
 				return e
 			}

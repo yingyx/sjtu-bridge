@@ -21,6 +21,20 @@ type ServiceDestination struct {
 	Upstream             *Handoff `json:"upstream,omitempty"`
 }
 
+// ExternalClientGuide describes an independently configured tool. It neither
+// installs the tool nor grants access through Bridge or its credential vault.
+type ExternalClientGuide struct {
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	InstallURL       string   `json:"install_url,omitempty"`
+	DocumentationURL string   `json:"documentation_url"`
+	Setup            []string `json:"setup"`
+	Authentication   string   `json:"authentication"`
+	Scope            string   `json:"scope"`
+	Verification     string   `json:"verification"`
+	Limitations      []string `json:"limitations"`
+}
+
 // CategoryLabel and TaskGroupLabel expose display labels, never permissions.
 func CategoryLabel(id string) string      { return categoryLabels[id] }
 func TaskGroupLabel(path TaskPath) string { return taskGroupLabels[path] }
@@ -30,23 +44,24 @@ func TaskGroupLabel(path TaskPath) string { return taskGroupLabels[path] }
 // SupportedCapabilityIDs is reference metadata; only AvailableCapabilities is
 // projected from the caller's currently authorized executable catalog.
 type ServiceEntry struct {
-	ID                     string               `json:"id"`
-	Title                  string               `json:"title"`
-	Purpose                string               `json:"purpose"`
-	Service                string               `json:"service"`
-	Audience               string               `json:"audience,omitempty"`
-	Owner                  string               `json:"owner,omitempty"`
-	Primary                TaskPath             `json:"primary"`
-	CrossListings          []TaskPath           `json:"cross_listings"`
-	Aliases                []string             `json:"aliases"`
-	Keywords               []string             `json:"keywords"`
-	SupportedCapabilityIDs []string             `json:"supported_capability_ids"`
-	AvailableCapabilities  []CapabilitySummary  `json:"available_capabilities"`
-	Destinations           []ServiceDestination `json:"destinations"`
-	Sources                []NavigationSource   `json:"sources"`
-	VerifiedAt             string               `json:"verified_at"`
-	LinkCheckedThisCall    bool                 `json:"link_checked_this_call"`
-	ManualLimitations      []string             `json:"manual_limitations"`
+	ID                     string                `json:"id"`
+	Title                  string                `json:"title"`
+	Purpose                string                `json:"purpose"`
+	Service                string                `json:"service"`
+	Audience               string                `json:"audience,omitempty"`
+	Owner                  string                `json:"owner,omitempty"`
+	Primary                TaskPath              `json:"primary"`
+	CrossListings          []TaskPath            `json:"cross_listings"`
+	Aliases                []string              `json:"aliases"`
+	Keywords               []string              `json:"keywords"`
+	SupportedCapabilityIDs []string              `json:"supported_capability_ids"`
+	AvailableCapabilities  []CapabilitySummary   `json:"available_capabilities"`
+	Destinations           []ServiceDestination  `json:"destinations"`
+	Sources                []NavigationSource    `json:"sources"`
+	VerifiedAt             string                `json:"verified_at"`
+	LinkCheckedThisCall    bool                  `json:"link_checked_this_call"`
+	ManualLimitations      []string              `json:"manual_limitations"`
+	ExternalClients        []ExternalClientGuide `json:"external_clients"`
 }
 
 // ServicePage is a bounded snapshot of the bundled, curated task directory.

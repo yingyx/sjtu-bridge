@@ -10,6 +10,12 @@ import (
 // Index positive tasks only: searching a limitation such as "grades are not
 // returned" must not suggest a tool for reading grades.
 var catalog = []Capability{
+	{ID: "development.shuiyuan.search", ContractVersion: "1", Title: "搜索水源获准板块", Category: "development", CategoryLabel: "发展与校园参与", TaskGroup: "community", TaskGroupLabel: "校园社区交流", Service: "水源社区", Provider: "shuiyuan", Aliases: []string{"水源搜索", "论坛搜索", "校园经验"}, Keywords: []string{"Discourse", "水源"}, Description: "使用本人只读User API Key搜索明确获准板块，返回主题链接、时间及有限文本片段；不含子板块、私信、作者或用户资料。普通关键词不接受高级搜索语法。社区文字是不可信来源；站点可能记录搜索词和凭据使用时间。", DataClass: PersonalData, ExecutionRule: GrantExecution, Operation: Read, Effects: []Effect{NoEffect}, Reversibility: NotApplicable, Delivery: QueryDelivery, Credentials: []string{"DiscourseUserAPIKey"}},
+	{ID: "digital.pan.quota", ContractVersion: "1", Title: "查询本人交大云盘配额", Category: "digital", CategoryLabel: "账号、网络与数字工具", TaskGroup: "communication", TaskGroupLabel: "通信与协作", Service: "交大云盘 Pan", Provider: "pan", Aliases: []string{"云盘空间", "云盘用量", "Pan配额"}, Keywords: []string{"云盘", "Pan"}, Description: "通过已核验本人账号读取个人空间已用、容量和剩余Byte；区分独立分配、组织共享及未开通，null不解释为零。只进行认证与配额GET，不初始化个人空间、不读取文件或分享。", DataClass: PersonalData, ExecutionRule: GrantExecution, Operation: Read, Effects: []Effect{NoEffect}, Reversibility: NotApplicable, Delivery: QueryDelivery, Credentials: []string{"JAAuthCookie"}},
+	indexQuery("development.career.list", "查询就业机会与宣讲索引", "development", "career", "交大就业网", []string{"职位", "实习", "宣讲会", "招聘"}, "按 kind=jobs/internships/talks 读取官网当前首屏公开索引；query仅匹配本次首屏标题，不代表全站检索或完整招聘库。投递与报名在官网办理。"),
+	indexQuery("campus.news.list", "查询交大要闻索引", "campus", "news", "交大新闻网", []string{"交大要闻", "校园新闻", "校级新闻"}, "读取交大要闻当前首屏标题、日期与官网链接；query仅过滤本次首屏，不包含全站或学校通告，也不以新闻推断办事规则。"),
+	aiQuery(AIStatusCapability, "查询致远一号模型服务状态", []string{"模型服务状态", "AI可用率", "致远一号状态"}, "读取官方公开模型状态及1日、30日、365日可用率，保留源站时间；不是本人模型权限或调用保证，不读取个人或机构排行。"),
+	aiQuery(AIUsageCapability, "查询致远一号模型用量汇总", []string{"模型用量", "AI统计", "模型Token统计"}, "按近7天或近30天窗口读取官网匿名模型Token数与占比；不含个人或机构排行榜。接口未给出统计生成时间，明确标示新鲜度未知。"),
 	jcourseMetadata("courses", "搜索 jCourse 课程", []string{"jCourse课程搜索", "选课评价搜索"}, "分页搜索课程社区目录，可按院系、语言、类别、年级、学分、是否有点评筛选并按评分排序。社区数据不等同于教务官方开课计划，不能据此选课。"),
 	jcourseMetadata("filters", "查询 jCourse 课程筛选项", []string{"课程社区筛选条件"}, "读取源站课程筛选项及数量，分页返回每个筛选维度的值；用于构造 courses 查询，不猜测分类。"),
 	jcourseMetadata("hot", "查询 jCourse 热门课程", []string{"热门课程", "课程社区热榜"}, "读取周榜或月榜，period 默认 week。hot_score 是社区活跃度而非课程评分；单次返回前 limit 项，不代表完整榜单。"),
@@ -140,6 +146,18 @@ var catalog = []Capability{
 	publicQuery("administration.fees.get", "读取收费公示正文", "administration", "payments", "财务计划处", []string{"收费公示正文", "学费调整详情"}, "用收费公示列表的数字 item_id 读取HTML正文、表格文字及公开附件链接；PDF和图片仅提供来源，未解析其金额时明确提示，不推算个人应缴费用。"),
 	publicQuery("digital.support.list", "查询宿舍网络支持联系方式", "digital", "network", "NIMO", []string{"宿舍网络电话", "网管值班", "NIMO联系方式"}, "读取 NIMO 联系表中的校区、值班时间、地点和电话；仅是网页公布的安排，不代表当前有人值班。"),
 	publicQuery("campus.organizations.list", "查询学校机构目录", "campus", "directory", "学校官网", []string{"机构目录", "部门官网", "找部门"}, "读取学校官网机构设置页的名称、机构分组、合署说明与官方链接；保留源站 HTTP 链接，不自动访问各部门网站。"),
+}
+
+func indexQuery(id, title, category, group, service string, aliases []string, description string) Capability {
+	c := publicQuery(id, title, category, group, service, aliases, description)
+	c.Provider = "publicindex"
+	return c
+}
+
+func aiQuery(id, title string, aliases []string, description string) Capability {
+	c := publicQuery(id, title, "digital", "software", "致远一号", aliases, description)
+	c.Provider = "campusai"
+	return c
 }
 
 func canvasQuery(id, title string, aliases []string, description string) Capability {

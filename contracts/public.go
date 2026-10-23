@@ -18,6 +18,12 @@ func ValidDiningCanteen(id string) bool {
 // PublicInputSchema defines service-specific filters outside the shared Engine.
 // A schema describes accepted input; execution still requires policy admission.
 func PublicInputSchema(id string) json.RawMessage {
+	if schema := AIPublicInputSchema(id); schema != nil {
+		return schema
+	}
+	if schema := CommunityPublicInputSchema(id); schema != nil {
+		return schema
+	}
 	props := map[string]any{
 		"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "每页最多返回的条数"},
 		"cursor": map[string]any{"type": "string", "maxLength": 4096, "description": "上次结果的 next_cursor；续页须保持相同命令、筛选条件和 limit"},

@@ -13,7 +13,7 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/policy"
 )
 
-const Revision = "bundled:2026-10-22-tasks-v2"
+const Revision = "bundled:2026-10-23-tasks-v4"
 const Scope = "curated_bundled_tasks"
 
 type navigationBinding struct {
@@ -118,6 +118,7 @@ func authorizedDefinitions(caps []contracts.Capability) map[string]contracts.Cap
 		if c.ContractVersion != t.ContractVersion || c.Provider != t.Provider || c.DataClass != t.DataClass || c.Operation != t.Operation || c.Delivery != t.Delivery || c.ExecutionRule != t.ExecutionRule || c.Reversibility != t.Reversibility || !slices.Equal(c.Effects, t.Effects) || !slices.Equal(c.Credentials, t.Credentials) {
 			continue
 		}
+		t.Authorized = true
 		result[c.ID] = t
 	}
 	return result
@@ -136,6 +137,11 @@ func project(e contracts.ServiceEntry, available map[string]contracts.Capability
 }
 
 func cloneEntry(e contracts.ServiceEntry) contracts.ServiceEntry {
+	e.ExternalClients = append([]contracts.ExternalClientGuide{}, e.ExternalClients...)
+	for i := range e.ExternalClients {
+		e.ExternalClients[i].Setup = append([]string{}, e.ExternalClients[i].Setup...)
+		e.ExternalClients[i].Limitations = append([]string{}, e.ExternalClients[i].Limitations...)
+	}
 	e.CrossListings = append([]contracts.TaskPath{}, e.CrossListings...)
 	e.Aliases = append([]string{}, e.Aliases...)
 	e.Keywords = append([]string{}, e.Keywords...)
@@ -262,6 +268,11 @@ func capabilityTasks() map[string][]string {
 	add("sports-venues", "life.sports.navigate")
 	add("campus-payments", "administration.payments.navigate")
 	add("campus-map", "campus.maps.navigate")
+	add("career-opportunities", contracts.CareerListCapability)
+	add("campus-news", contracts.CampusNewsCapability)
+	add("campus-ai", contracts.AIStatusCapability, contracts.AIUsageCapability)
+	add("cloud-storage", contracts.PanQuotaCapability)
+	add("shuiyuan-community", contracts.ShuiyuanSearchCapability)
 	return m
 }
 
@@ -362,6 +373,10 @@ func buildRecords() []record {
 		r := &result[indices[id]]
 		r.entry.Destinations = []contracts.ServiceDestination{{Title: "交我办：人工搜索“" + r.entry.Title + "”", URL: "https://my.sjtu.edu.cn/", Kind: "official_directory"}}
 	}
+	result = mergeReviewedRecords(result, communityExpansionRecords())
+	result = mergeReviewedRecords(result, externalExpansionRecords())
+	result = mergeReviewedRecords(result, collaborationExpansionRecords())
+	result = mergeReviewedRecords(result, aiExpansionRecords())
 	// Coalesce exact locators, keeping distinct downstream action descriptions.
 	for i := range result {
 		r := &result[i]

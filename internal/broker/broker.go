@@ -27,6 +27,8 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/providers/dekt"
 	"github.com/yingyx/sjtu-bridge/internal/providers/electric"
 	"github.com/yingyx/sjtu-bridge/internal/providers/jcourse"
+	"github.com/yingyx/sjtu-bridge/internal/providers/pan"
+	"github.com/yingyx/sjtu-bridge/internal/providers/shuiyuan"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sjtumail"
 	"github.com/yingyx/sjtu-bridge/internal/providers/teaching"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
@@ -132,7 +134,11 @@ func Run(ctx context.Context) error {
 	defer closeBath()
 	jcourseService, closeJCourse := jcourse.New()
 	defer closeJCourse()
-	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "dekt": dektService, "electric": electricService, "bath": bathService, "jcourse": jcourseService}
+	panService, closePan := pan.New()
+	defer closePan()
+	forumService, closeForum := shuiyuan.New()
+	defer closeForum()
+	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "dekt": dektService, "electric": electricService, "bath": bathService, "jcourse": jcourseService, "pan": panService, "shuiyuan": forumService}
 	return b.Serve(ctx, l)
 }
 func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
@@ -226,6 +232,16 @@ func (b *Broker) Handler() http.Handler {
 		if binding, ok := v.(resourceVerification); ok {
 			e = b.Store.PublishSourceCredential(binding.source, func() error {
 				writeJSON(w, map[string]any{"account_ref": binding.account, "resource_refs": []string{binding.resource}})
+				return nil
+			})
+			if e != nil {
+				writeError(w, e)
+			}
+			return
+		}
+		if categories, ok := v.(categoryVerification); ok {
+			e = b.Store.PublishCredential(categories.credential, func() error {
+				writeJSON(w, categories.payload())
 				return nil
 			})
 			if e != nil {

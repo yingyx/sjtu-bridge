@@ -52,14 +52,15 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		if provider == "jaccount" {
 			return contracts.Fail("NOT_READY", "JAAuthCookie stable identity is not ready for persistent import")
 		}
-		if provider != "canvas" && provider != "jcourse" && !campusCredentialProvider(provider) {
-			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, jcourse, teaching, sjtumail, activity, dekt, electric or bath")
+		kind, known := contracts.CredentialKind(provider)
+		if !known {
+			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, jcourse, shuiyuan, teaching, sjtumail, activity, dekt, electric, bath or pan")
 		}
-		if browserContext && (provider == "canvas" || provider == "jcourse") {
+		if browserContext && kind != "JAAuthCookie" {
 			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for campus JAAuthCookie providers")
 		}
 		normalizer := provider
-		if provider != "canvas" && provider != "jcourse" {
+		if kind == "JAAuthCookie" {
 			normalizer = "jaccount"
 		}
 		secret, e := auth.ReadCredential(input, diag, normalizer, true)
@@ -93,11 +94,12 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return write(v)
 	}}
-	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), jcourse (API Key), teaching / sjtumail / activity / dekt / electric / bath (JAAuthCookie, independently verified portal account)")
+	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), jcourse (API Key), shuiyuan (read User API Key), teaching / sjtumail / activity / dekt / electric / bath / pan (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
 	authCmd.AddCommand(campusLoginCommand(out, diag, input, jsonOutput, verbose))
+	authCmd.AddCommand(shuiyuanAuthorizeCommand(out, diag, input, jsonOutput, verbose))
 	checkProvider := ""
 	check := &cobra.Command{Use: "check", Short: "临时检查 jAccount 会话状态", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if checkProvider != "jaccount" {
@@ -117,7 +119,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	check.Flags().StringVar(&checkProvider, "provider", "", "Diagnostic provider (jaccount)")
 	authCmd.AddCommand(check)
 	ownerCommand := func(use, action string, q *broker.AdminRequest, mutating bool) *cobra.Command {
-		descriptions := map[string]string{"status": "查看已保存凭据、应用与授权状态", "credential_remove": "移除凭据并撤销关联应用授权", "courses": "列出已验证 Canvas 账号的课程", "resources": "查询本人宿舍电费账号的绑定房间", "app_revoke": "撤销应用连接及其授权", "grant": "授予应用指定账号、资源和视图的访问权", "grant_revoke": "撤销应用当前的个人能力授权"}
+		descriptions := map[string]string{"status": "查看已保存凭据、应用与授权状态", "credential_remove": "移除凭据并撤销关联应用授权", "courses": "列出已验证 Canvas 账号的课程", "resources": "发现本人电费绑定房间或水源可见板块资源", "app_revoke": "撤销应用连接及其授权", "grant": "授予应用指定账号、资源和视图的访问权", "grant_revoke": "撤销应用当前的个人能力授权"}
 		return &cobra.Command{Use: use, Short: descriptions[action], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if e := auth.RequireTerminal(input); e != nil {
 				return e
@@ -149,7 +151,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	authCmd.AddCommand(courses)
 	resourcesQ := &broker.AdminRequest{}
 	resources := ownerCommand("resources", "resources", resourcesQ, false)
-	resources.Flags().StringVar(&resourcesQ.CredentialID, "credential", "", "Independently verified electricity credential ID")
+	resources.Flags().StringVar(&resourcesQ.CredentialID, "credential", "", "Verified electricity credential for room binding, or shuiyuan credential for visible category references")
 	_ = resources.MarkFlagRequired("credential")
 	authCmd.AddCommand(resources)
 	root.AddCommand(authCmd)

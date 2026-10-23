@@ -92,6 +92,9 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		return map[string]any{"revision": s.Revision, "apps": apps, "credentials": s.Credentials, "grants": s.Grants, "jaccount": "portal_specific_identity_required"}, nil
 	case "resources":
 		c := s.Credentials[q.CredentialID]
+		if c.Provider == "shuiyuan" && len(q.Secret) == 0 {
+			return b.shuiyuanResources(ctx, c)
+		}
 		if c.Provider != "electric" || b.Engine.CampusProviders[c.Provider] == nil || len(q.Secret) != 0 {
 			return nil, contracts.Fail("UNSUPPORTED", "Bound resource discovery requires a saved electricity credential")
 		}
@@ -132,24 +135,26 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		if q.Provider != "canvas" && b.Engine.CampusProviders[q.Provider] == nil {
 			return nil, contracts.Fail("UNSUPPORTED", "Credential provider is not ready")
 		}
-		normalizer, kind := "canvas", "CanvasToken"
-		if q.Provider == "jcourse" {
-			normalizer, kind = "jcourse", "JCourseAPIKey"
-		} else if q.Provider != "canvas" {
-			normalizer, kind = "jaccount", "JAAuthCookie"
+		kind, known := contracts.CredentialKind(q.Provider)
+		if !known {
+			return nil, contracts.Fail("UNSUPPORTED", "Credential kind is not registered")
+		}
+		normalizer := q.Provider
+		if kind == "JAAuthCookie" {
+			normalizer = "jaccount"
 		}
 		var secret []byte
 		var e error
 		source := storage.Credential{}
 		if q.SourceCredentialID != "" {
 			source = s.Credentials[q.SourceCredentialID]
-			if len(q.Secret) != 0 || !source.Active || source.Kind != "JAAuthCookie" || source.Provider == q.Provider || (q.Provider == "canvas" || q.Provider == "jcourse") || b.Engine.CampusProviders[source.Provider] == nil {
+			if len(q.Secret) != 0 || !source.Active || source.Kind != "JAAuthCookie" || source.Provider == q.Provider || kind != "JAAuthCookie" || b.Engine.CampusProviders[source.Provider] == nil {
 				return nil, contracts.Fail("PERMISSION_DENIED", "Active credential from another supported campus portal required")
 			}
 			if e = b.Store.CheckSourceCredential(source); e != nil {
 				return nil, e
 			}
-		} else if q.Provider == "canvas" || q.Provider == "jcourse" {
+		} else if kind != "JAAuthCookie" {
 			secret, e = auth.Normalize(normalizer, q.Secret)
 		} else {
 			secret, e = auth.NormalizeCampusCredential(q.Secret)

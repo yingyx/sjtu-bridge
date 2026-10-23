@@ -87,6 +87,10 @@ func ValidCampusResource(id, ref string) bool {
 		return electricRoomRef.MatchString(ref)
 	case BathBindingCapability, BathDevicesCapability, BathUsageCapability:
 		return ref == "bath:self"
+	case PanQuotaCapability:
+		return ref == PanQuotaResource
+	case ShuiyuanSearchCapability:
+		return ValidShuiyuanResource(ref)
 	default:
 		return jcourseResource(id, ref)
 	}
@@ -141,6 +145,10 @@ func campusInputDefinition(id string) (map[string]any, bool) {
 		resource["enum"] = []string{"dekt:education:self"}
 	case ElectricityBalanceCapability, ElectricityHistoryCapability:
 		resource["pattern"] = electricRoomRef.String()
+	case PanQuotaCapability:
+		resource["enum"] = []string{PanQuotaResource}
+	case ShuiyuanSearchCapability:
+		resource["pattern"] = `^shuiyuan:category:[1-9][0-9]{0,9}$`
 	}
 	if id == BathBindingCapability || id == BathDevicesCapability || id == BathUsageCapability {
 		resource["enum"] = []string{"bath:self"}
@@ -178,7 +186,13 @@ func campusInputDefinition(id string) (map[string]any, bool) {
 	if !rules.Paginated {
 		props["cursor"] = map[string]any{"type": "string", "enum": []string{""}, "description": "此能力不分页，请省略"}
 	}
+	if id == ShuiyuanSearchCapability {
+		props["query"] = map[string]any{"type": "string", "minLength": 2, "maxLength": 128, "description": "普通关键词；按获准的精确板块搜索，不含子板块，不接受高级搜索语法"}
+	}
 	required := []string{"account_ref", "resource_ref", "view", "limit"}
+	if id == ShuiyuanSearchCapability {
+		required = append(required, "query")
+	}
 	addActivityInput(id, props, &required)
 	addUtilityInput(id, props, &required)
 	if JCourseOperation(id) != "" {
@@ -218,6 +232,12 @@ func CampusCapability(id, account string, resources []string, view string, limit
 		addSecondClassOutput(id, rowProps, &required, str)
 	} else if JCourseOperation(id) != "" {
 		addJCourseOutput(id, rowProps, &required)
+	} else if id == PanQuotaCapability {
+		rowProps["pan"] = PanQuotaSchema()
+		required = append(required, "pan")
+	} else if id == ShuiyuanSearchCapability {
+		rowProps["shuiyuan"] = ShuiyuanSearchSchema()
+		required = append(required, "shuiyuan")
 	} else if id != ElectricityBalanceCapability {
 		addUtilityOutput(id, rowProps, &required, str)
 	} else {
@@ -240,45 +260,47 @@ func CampusCapability(id, account string, resources []string, view string, limit
 }
 
 type CampusRecord struct {
-	Community       *CommunityRecord `json:"community,omitempty"`
-	UsedKWh         string           `json:"used_kwh,omitempty"`
-	Available       *bool            `json:"available,omitempty"`
-	Bound           *bool            `json:"bound,omitempty"`
-	BuildingRef     string           `json:"building_ref,omitempty"`
-	AvailableCount  *int             `json:"available_count,omitempty"`
-	InUseCount      *int             `json:"in_use_count,omitempty"`
-	AmountCNY       string           `json:"amount_cny,omitempty"`
-	ResourceRef     string           `json:"resource_ref"`
-	Ref             string           `json:"record_ref"`
-	Title           string           `json:"title"`
-	CourseCode      string           `json:"course_code,omitempty"`
-	Location        string           `json:"location,omitempty"`
-	Campus          string           `json:"campus,omitempty"`
-	Weekday         string           `json:"weekday,omitempty"`
-	Periods         string           `json:"periods,omitempty"`
-	Weeks           string           `json:"weeks,omitempty"`
-	Sender          string           `json:"sender,omitempty"`
-	SentAt          string           `json:"sent_at,omitempty"`
-	ActivityTime    []string         `json:"activity_time,omitempty"`
-	RemainingKWh    string           `json:"remaining_kwh,omitempty"`
-	SubsidyKWh      string           `json:"subsidy_kwh,omitempty"`
-	ParentRef       string           `json:"parent_ref,omitempty"`
-	ActivityTypeID  string           `json:"activity_type_id,omitempty"`
-	CalendarEnabled *bool            `json:"calendar_enabled,omitempty"`
-	Sponsor         string           `json:"sponsor,omitempty"`
-	Status          string           `json:"status,omitempty"`
-	Date            string           `json:"date,omitempty"`
-	Count           *int             `json:"count,omitempty"`
-	Module          string           `json:"module,omitempty"`
-	Organization    string           `json:"organization,omitempty"`
-	AwardedAt       string           `json:"awarded_at,omitempty"`
-	Level           string           `json:"level,omitempty"`
-	Role            string           `json:"role,omitempty"`
-	StartedAt       string           `json:"started_at,omitempty"`
-	EndedAt         string           `json:"ended_at,omitempty"`
-	Duration        string           `json:"duration,omitempty"`
-	DurationUnit    string           `json:"duration_unit,omitempty"`
-	DataSource      string           `json:"data_source,omitempty"`
+	Pan             *PanQuota          `json:"pan,omitempty"`
+	Shuiyuan        *ShuiyuanSearchHit `json:"shuiyuan,omitempty"`
+	Community       *CommunityRecord   `json:"community,omitempty"`
+	UsedKWh         string             `json:"used_kwh,omitempty"`
+	Available       *bool              `json:"available,omitempty"`
+	Bound           *bool              `json:"bound,omitempty"`
+	BuildingRef     string             `json:"building_ref,omitempty"`
+	AvailableCount  *int               `json:"available_count,omitempty"`
+	InUseCount      *int               `json:"in_use_count,omitempty"`
+	AmountCNY       string             `json:"amount_cny,omitempty"`
+	ResourceRef     string             `json:"resource_ref"`
+	Ref             string             `json:"record_ref"`
+	Title           string             `json:"title"`
+	CourseCode      string             `json:"course_code,omitempty"`
+	Location        string             `json:"location,omitempty"`
+	Campus          string             `json:"campus,omitempty"`
+	Weekday         string             `json:"weekday,omitempty"`
+	Periods         string             `json:"periods,omitempty"`
+	Weeks           string             `json:"weeks,omitempty"`
+	Sender          string             `json:"sender,omitempty"`
+	SentAt          string             `json:"sent_at,omitempty"`
+	ActivityTime    []string           `json:"activity_time,omitempty"`
+	RemainingKWh    string             `json:"remaining_kwh,omitempty"`
+	SubsidyKWh      string             `json:"subsidy_kwh,omitempty"`
+	ParentRef       string             `json:"parent_ref,omitempty"`
+	ActivityTypeID  string             `json:"activity_type_id,omitempty"`
+	CalendarEnabled *bool              `json:"calendar_enabled,omitempty"`
+	Sponsor         string             `json:"sponsor,omitempty"`
+	Status          string             `json:"status,omitempty"`
+	Date            string             `json:"date,omitempty"`
+	Count           *int               `json:"count,omitempty"`
+	Module          string             `json:"module,omitempty"`
+	Organization    string             `json:"organization,omitempty"`
+	AwardedAt       string             `json:"awarded_at,omitempty"`
+	Level           string             `json:"level,omitempty"`
+	Role            string             `json:"role,omitempty"`
+	StartedAt       string             `json:"started_at,omitempty"`
+	EndedAt         string             `json:"ended_at,omitempty"`
+	Duration        string             `json:"duration,omitempty"`
+	DurationUnit    string             `json:"duration_unit,omitempty"`
+	DataSource      string             `json:"data_source,omitempty"`
 }
 type CampusResponse struct {
 	SchemaVersion string     `json:"schema_version"`

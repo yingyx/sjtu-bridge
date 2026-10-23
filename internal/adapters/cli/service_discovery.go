@@ -107,6 +107,19 @@ func writeServiceEntry(out io.Writer, entry contracts.ServiceEntry, connected bo
 	for _, boundary := range entry.ManualLimitations {
 		fmt.Fprintf(&text, "  办理边界：%s\n", boundary)
 	}
+	for _, tool := range entry.ExternalClients {
+		fmt.Fprintf(&text, "  外部工具：%s · %s\n    文档：%s\n", tool.Title, tool.ID, tool.DocumentationURL)
+		if tool.InstallURL != "" {
+			fmt.Fprintf(&text, "    安装来源：%s\n", tool.InstallURL)
+		}
+		fmt.Fprintf(&text, "    认证：%s\n    范围：%s\n    验证：%s\n", tool.Authentication, tool.Scope, tool.Verification)
+		for _, step := range tool.Setup {
+			fmt.Fprintf(&text, "    配置：%s\n", step)
+		}
+		for _, limitation := range tool.Limitations {
+			fmt.Fprintf(&text, "    限制：%s\n", limitation)
+		}
+	}
 	fmt.Fprintf(&text, "  资料核验：%s；本次未探测链接。\n", entry.VerifiedAt)
 	for _, source := range entry.Sources {
 		fmt.Fprintf(&text, "  依据：%s %s\n", source.Title, source.URL)

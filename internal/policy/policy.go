@@ -25,12 +25,17 @@ func ExecutableRead(c contracts.Capability) bool {
 			provider = "electric"
 		case contracts.BathBindingCapability, contracts.BathDevicesCapability, contracts.BathUsageCapability:
 			provider = "bath"
+		case contracts.PanQuotaCapability:
+			provider = "pan"
 		}
 		if provider != "" {
 			return c.Provider == provider && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "JAAuthCookie"
 		}
 		if contracts.JCourseOperation(c.ID) != "" {
 			return c.Provider == "jcourse" && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "JCourseAPIKey"
+		}
+		if c.ID == contracts.ShuiyuanSearchCapability {
+			return c.Provider == "shuiyuan" && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == "DiscourseUserAPIKey"
 		}
 		_, canvasRead := contracts.CanvasRules(c.ID)
 		return (c.ID == contracts.AssignmentsCapability || canvasRead) && c.Provider == "canvas" &&
@@ -44,6 +49,10 @@ func ExecutableRead(c contracts.Capability) bool {
 		return false
 	}
 	switch c.ID {
+	case contracts.AIStatusCapability, contracts.AIUsageCapability:
+		return c.Provider == "campusai" && c.Delivery == contracts.QueryDelivery
+	case "development.career.list", "campus.news.list":
+		return c.Provider == "publicindex" && c.Delivery == contracts.QueryDelivery
 	case "campus.buildings.list", "campus.buildings.details", "learning.semester.current", "learning.semester.periods", "learning.classrooms.list", "learning.classrooms.types", "learning.classrooms.filters", "learning.classrooms.details", "learning.classrooms.schedule", "learning.classrooms.available", "learning.courses.search", "campus.notices.list", "campus.notices.get", "campus.contacts.list", "campus.contacts.details", "life.lostfound.list":
 		return c.Provider == "ids" && c.Delivery == contracts.QueryDelivery
 	case "public.notices.search", "life.dining.list", "life.dining.areas", "life.dining.series":

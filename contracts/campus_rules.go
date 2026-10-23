@@ -30,6 +30,10 @@ type CampusReadRules struct {
 func CampusRules(id string) (CampusReadRules, bool) {
 	r := CampusReadRules{capability: id, MaxResources: 8, Paginated: true}
 	switch id {
+	case PanQuotaCapability:
+		r.View, r.MaxLimit, r.MaxResources, r.Paginated, r.Coverage = PanQuotaView, 1, 1, false, PanQuotaCoverage
+	case ShuiyuanSearchCapability:
+		r.View, r.MaxLimit, r.Coverage, r.QueryAllowed = ShuiyuanSearchView, 20, ShuiyuanSearchCoverage, true
 	case TimetableCapability:
 		r.View, r.MaxLimit, r.Coverage = TimetableView, 100, "regular_courses_only"
 	case MailCapability:
@@ -84,7 +88,7 @@ func CampusRules(id string) (CampusReadRules, bool) {
 // CampusCapabilityIDs returns a fresh list of reviewed contracts. Enumeration
 // conveys no authorization and does not replace per-application grants.
 func CampusCapabilityIDs() []string {
-	ids := []string{TimetableCapability, MailCapability, ActivityCapability, ActivityTypesCapability, ActivityCalendarCapability, ActivityCountsCapability, ActivityRegistrationsCapability, ActivityCollectionsCapability, SecondClassHonorsCapability, SecondClassPracticeCapability, SecondClassEducationCapability, ElectricityBalanceCapability, ElectricityHistoryCapability, BathBindingCapability, BathDevicesCapability, BathUsageCapability}
+	ids := []string{PanQuotaCapability, ShuiyuanSearchCapability, TimetableCapability, MailCapability, ActivityCapability, ActivityTypesCapability, ActivityCalendarCapability, ActivityCountsCapability, ActivityRegistrationsCapability, ActivityCollectionsCapability, SecondClassHonorsCapability, SecondClassPracticeCapability, SecondClassEducationCapability, ElectricityBalanceCapability, ElectricityHistoryCapability, BathBindingCapability, BathDevicesCapability, BathUsageCapability}
 	for _, op := range []string{"courses", "filters", "hot", "course", "reviews", "review_filters", "review_trend", "teachers", "teacher_filters", "teacher", "teacher_courses", "enrolled", "followed", "ignored"} {
 		ids = append(ids, JCoursePrefix+op)
 	}
@@ -111,7 +115,7 @@ func (r CampusReadRules) ValidGrant(view string, limit int, resources []string) 
 
 // ValidQuery checks contract shape only, not whether an application owns it.
 func (r CampusReadRules) ValidQuery(q CampusQuery) bool {
-	return r.ValidViewLimit(q.View, q.Limit) && ValidCampusResource(r.capability, q.ResourceRef) && (r.QueryAllowed || q.Query == "") && (r.Paginated || q.Cursor == "") && validActivityFilters(r.capability, q) && validUtilityFilters(r.capability, q) && validJCourseFilters(r.capability, q)
+	return r.ValidViewLimit(q.View, q.Limit) && ValidCampusResource(r.capability, q.ResourceRef) && (r.QueryAllowed || q.Query == "") && (r.Paginated || q.Cursor == "") && (r.capability != ShuiyuanSearchCapability || ValidShuiyuanQuery(q.Query)) && validActivityFilters(r.capability, q) && validUtilityFilters(r.capability, q) && validJCourseFilters(r.capability, q)
 }
 
 // AllowsInputField rejects unrelated portal fields even when their JSON values
