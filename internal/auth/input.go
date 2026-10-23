@@ -13,10 +13,16 @@ import (
 
 // Normalize accepts one credential value, not an HTTP header or cookie dump.
 func Normalize(provider string, secret []byte) ([]byte, error) {
-	if provider != "canvas" && provider != "jaccount" && provider != "jcourse" {
+	if provider != "canvas" && provider != "jaccount" && provider != "jcourse" && provider != "shuiyuan" {
 		return nil, contracts.Fail("UNSUPPORTED", "Unknown credential provider")
 	}
 	value := string(secret)
+	if provider == "shuiyuan" {
+		if len(value) != 32 || strings.IndexFunc(value, func(r rune) bool { return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') }) >= 0 {
+			return nil, contracts.Fail("INVALID_ARGUMENT", "Expected a Discourse user API key value")
+		}
+		return append([]byte(nil), secret...), nil
+	}
 	if provider == "jaccount" {
 		value = strings.TrimPrefix(value, "JAAuthCookie=")
 	}
@@ -47,6 +53,9 @@ func ReadCredential(input io.Reader, diagnostics io.Writer, provider string, per
 	label := "Canvas Token"
 	if provider == "jcourse" {
 		label = "jCourse API Key"
+	}
+	if provider == "shuiyuan" {
+		label = "水源 User API Key"
 	}
 	if provider == "jaccount" {
 		label = "JAAuthCookie"

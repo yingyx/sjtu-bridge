@@ -65,6 +65,15 @@ func (s *Store) CheckedCredentialSecret(c Credential) ([]byte, error) {
 // PublishSourceCredential binds final owner verification output to the source
 // generation. Only the short publication callback holds the credential fence.
 func (s *Store) PublishSourceCredential(c Credential, send func() error) error {
+	if c.Kind != "JAAuthCookie" {
+		return contracts.Fail("AUTH_REQUIRED", "Campus root credential required")
+	}
+	return s.PublishCredential(c, send)
+}
+
+// PublishCredential fences owner discovery of any independently verified
+// credential. It conveys neither application access nor SSO reuse permission.
+func (s *Store) PublishCredential(c Credential, send func() error) error {
 	s.mu.RLock()
 	fence := s.fences["credential:"+c.ID]
 	s.mu.RUnlock()
@@ -73,23 +82,15 @@ func (s *Store) PublishSourceCredential(c Credential, send func() error) error {
 	}
 	fence.RLock()
 	defer fence.RUnlock()
-	if err := s.CheckSourceCredential(c); err != nil {
+	if err := s.CheckCredential(c); err != nil {
 		return err
 	}
 	return send()
 }
 
 func validCredential(c Credential) bool {
-	switch c.Provider {
-	case "jcourse":
-		return c.Kind == "JCourseAPIKey"
-	case "canvas":
-		return c.Kind == "CanvasToken"
-	case "teaching", "sjtumail", "activity", "dekt", "electric", "bath":
-		return c.Kind == "JAAuthCookie"
-	default:
-		return false
-	}
+	kind, known := contracts.CredentialKind(c.Provider)
+	return known && c.Kind == kind
 }
 func grantResources(g Grant) []string {
 	_, canvasRead := contracts.CanvasRules(g.Capability)
