@@ -85,4 +85,17 @@ func TestEntrypointParity(t *testing.T) {
 	if _, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "auth_import", Arguments: map[string]any{}}); err == nil {
 		t.Fatal("unknown management tool accepted")
 	}
+	var pan *sdk.Tool
+	for _, tool := range tools.Tools {
+		if tool.Name == "digital_pan_quota" {
+			pan = tool
+		}
+	}
+	if pan == nil || !strings.Contains(pan.Description, "JAAuthCookie") || !strings.Contains(pan.Description, "当前可调用：false") {
+		t.Fatal("unconnected discovery omitted personal setup requirements", pan)
+	}
+	denied, err = session.CallTool(ctx, &sdk.CallToolParams{Name: "digital_pan_quota", Arguments: map[string]any{"account_ref": "pan:user:1:7", "resource_ref": "pan:space:self", "view": "quota_v1", "limit": 1}})
+	if err != nil || !denied.IsError || !strings.Contains(denied.Content[0].(*sdk.TextContent).Text, "PERMISSION_DENIED") {
+		t.Fatal("static tool discovery enabled personal invocation", denied, err)
+	}
 }

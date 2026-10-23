@@ -68,6 +68,9 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	}
 	defer registry.Close()
 	for _, c := range registry.Capabilities() {
+		if c.DataClass != contracts.PublicData {
+			continue // Personal commands use the Broker-only handlers below.
+		}
 		parts := contracts.CLIPath(c.ID)
 		resource := ensureCommandPath(root, parts[:len(parts)-1], c.CategoryLabel+"公开查询与服务导航")
 		var jsonInput *jsonInputOptions

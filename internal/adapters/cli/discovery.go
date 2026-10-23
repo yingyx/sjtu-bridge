@@ -30,7 +30,7 @@ func discover(ctx context.Context, profile, connection string) ([]contracts.Capa
 }
 
 func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *string, jsonOutput, verbose *bool) {
-	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "查看当前可调用能力的技术契约", Long: "先用 search 查找任务，再用 describe 查看参数和调用示例。\n使用 --connection 加入应用获准的个人能力；--verbose 查看完整契约。"}
+	group := &cobra.Command{Use: "capabilities", GroupID: "discovery", Short: "发现已接入能力、凭据和授权要求", Long: "不带 --connection 可发现全部已接入能力及配置要求，无需启动 Broker 或登录。\n带 --connection 查看该应用当前获准的能力和范围；发现不授予权限，实际调用重新校验。\n使用 describe 查看参数和调用示例；--verbose 查看完整契约。"}
 	for _, verb := range []string{"list", "search"} {
 		filter := contracts.CapabilityFilter{}
 		use, short, args := "list", "列出能力摘要，可按分类和服务筛选", cobra.NoArgs
@@ -60,10 +60,11 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 			}
 			var text strings.Builder
 			if len(caps) == 0 {
-				fmt.Fprintln(&text, "当前可用能力中没有匹配项。可缩短关键词，或使用 sjtu capabilities list"+discoveryConnectionSuffix(*connection != "")+" 查看目录。")
+				fmt.Fprintln(&text, "当前目录中没有匹配项。可缩短关键词，或使用 sjtu capabilities list"+discoveryConnectionSuffix(*connection != "")+" 查看目录。")
 			} else {
 				for i, summary := range discoverySummaries(caps, *connection != "") {
 					fmt.Fprintf(&text, "%s  %s · %s\n  %s\n  %s\n", summary.ID, summary.Title, deliveryLabel(summary.Delivery), summary.CLICommand, summary.Description)
+					fmt.Fprintf(&text, "  %s\n", capabilityAccessLabel(summary))
 					if *verbose {
 						c := caps[i]
 						fmt.Fprintf(&text, "  ID：%s；%s / %s / %s\n  %s; data=%s; effects=%v; reversibility=%s; execution=%s\n  %s\n", c.ID, c.CategoryLabel, c.TaskGroupLabel, c.Service, c.Operation, c.DataClass, c.Effects, c.Reversibility, c.ExecutionRule, c.Description)
@@ -79,7 +80,7 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 		command.Flags().StringVar(&filter.Service, "service", "", "服务名称，如 Canvas / 教务处")
 		if verb == "search" {
 			command.Example = "  sjtu capabilities search 校历\n  sjtu capabilities search \"作业 截止时间\" --connection ABSOLUTE_PATH --json"
-			command.Long = "按任务名称、别名和关键词检索当前可用能力，最相关的结果在前。\n大小写不敏感，空白分隔的所有词都须匹配；分类匹配排在任务和关键词之后。"
+			command.Long = "按任务名称、别名和关键词检索已接入能力，最相关的结果在前。\n不带连接显示全部已接入能力及配置要求；带连接仅显示本应用当前获准能力。\n大小写不敏感，空白分隔的所有词都须匹配；分类匹配排在任务和关键词之后。"
 		}
 		group.AddCommand(command)
 	}
@@ -89,7 +90,7 @@ func addDiscovery(root *cobra.Command, out io.Writer, profile, connection *strin
 			return err
 		}
 		for _, c := range caps {
-			if c.Authorized && c.ID == args[0] {
+			if c.ID == args[0] {
 				if *verbose {
 					return writePrettyJSON(out, c)
 				}

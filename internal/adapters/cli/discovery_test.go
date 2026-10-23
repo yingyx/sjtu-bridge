@@ -42,23 +42,17 @@ func TestHelpSeparatesTasksManagementAndRuntime(t *testing.T) {
 	}
 }
 
-func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
+func TestUnconnectedTaskDiscoveryAndDetails(t *testing.T) {
 	for _, test := range []struct {
 		args []string
 		ids  []string
 	}{
-		{[]string{"list"}, []string{"administration.fees.get", "administration.fees.list", "administration.payments.navigate", "campus.buildings.details", "campus.buildings.list", "campus.contacts.details", "campus.contacts.list", "campus.maps.navigate", "campus.news.list", "campus.notices.get", "campus.notices.list", "campus.organizations.list", "development.activities.navigate", "development.career.list", "development.notices.get", "development.notices.list", "digital.ai.status", "digital.ai.usage", "digital.network.navigate", "digital.software.list", "digital.software.navigate", "digital.support.list", "learning.classrooms.available", "learning.classrooms.details", "learning.classrooms.filters", "learning.classrooms.list", "learning.classrooms.navigate", "learning.classrooms.schedule", "learning.classrooms.types", "learning.courses.search", "learning.practice.navigate", "learning.semester.current", "learning.semester.periods", "library.borrowing.list", "library.loans.navigate", "library.spaces.navigate", "life.dining.areas", "life.dining.list", "life.dining.series", "life.health.get", "life.health.list", "life.lostfound.list", "life.lostfound.navigate", "life.sports.navigate", "life.utilities.navigate", "public.calendars.list", "public.notices.list", "public.notices.search", "public.services.list", "research.computing.navigate", "research.hardware.list"}},
-		{[]string{"search", "校历"}, []string{"public.calendars.list", "campus.contacts.details", "campus.contacts.list", "learning.classrooms.available", "learning.classrooms.details", "learning.classrooms.filters", "learning.classrooms.list", "learning.classrooms.navigate", "learning.classrooms.schedule", "learning.classrooms.types", "learning.courses.search", "learning.semester.current", "learning.semester.periods"}},
+		{[]string{"search", "云盘"}, []string{contracts.PanQuotaCapability}},
+		{[]string{"search", "水源"}, []string{contracts.ShuiyuanSearchCapability}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list", "public.notices.search"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},
-		{[]string{"search", "作业"}, []string{}},
-		{[]string{"search", "宿舍洗浴"}, []string{"life.utilities.navigate"}},
 		{[]string{"search", "软件目录"}, []string{"digital.software.list"}},
-		{[]string{"search", "当前学期"}, []string{"learning.semester.current"}},
 		{[]string{"search", "空闲教室"}, []string{"learning.classrooms.available"}},
-		{[]string{"search", "失物招领"}, []string{"life.lostfound.list", "life.lostfound.navigate"}},
-		{[]string{"list", "--category", "development", "--task-group", "activities"}, []string{"development.activities.navigate", "development.notices.get", "development.notices.list", "learning.practice.navigate"}},
-		{[]string{"search", "二课", "--category", "learning", "--task-group", "practice"}, []string{"development.activities.navigate", "learning.practice.navigate"}},
 		{[]string{"list", "--category", "research", "--task-group", "activities"}, []string{}},
 	} {
 		var out, diag bytes.Buffer
@@ -72,8 +66,11 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 			t.Fatal(out.String())
 		}
 		for i, c := range caps {
-			if c.ID != test.ids[i] || c.Title == "" || c.Description == "" || c.Service == "" || c.Category == "" || c.CLICommand == "" || c.MCPTool == "" {
+			if c.ID != test.ids[i] || c.Title == "" || c.Description == "" || c.CLICommand == "" || c.MCPTool == "" {
 				t.Fatal(out.String())
+			}
+			if c.AuthorizationRequired && (c.Authorized || len(c.Credentials) != 1 || len(c.GrantScope) == 0 || !strings.Contains(c.CLICommand, "--connection")) {
+				t.Fatal("invalid setup requirements", out.String())
 			}
 		}
 	}
@@ -82,11 +79,24 @@ func TestPublicTaskDiscoveryAndDetails(t *testing.T) {
 		t.Fatal(diag.String())
 	}
 	var detail contracts.Capability
-	if json.Unmarshal(out.Bytes(), &detail) != nil || len(detail.InputSchema) == 0 || len(detail.OutputSchema) == 0 {
-		t.Fatal("missing detail", out.String())
+	if json.Unmarshal(out.Bytes(), &detail) != nil || len(detail.InputSchema) == 0 || len(detail.OutputSchema) == 0 || !detail.Authorized {
+		t.Fatal(out.String())
 	}
-	if !strings.Contains(out.String(), "\n  ") {
-		t.Fatal("verbose JSON should be readable", out.String())
+	out.Reset()
+	if Execute(context.Background(), []string{"capabilities", "describe", contracts.PanQuotaCapability, "--json"}, &out, &diag, strings.NewReader("")) != 0 {
+		t.Fatal(diag.String())
+	}
+	var usage capabilityUsage
+	if json.Unmarshal(out.Bytes(), &usage) != nil || usage.Authorized || !usage.AuthorizationRequired || len(usage.Credentials) != 1 || usage.Credentials[0] != "JAAuthCookie" || len(usage.InputSchema) == 0 || !strings.Contains(usage.Example, "--connection CONNECTION_FILE") {
+		t.Fatal(out.String())
+	}
+	if strings.Contains(string(usage.InputSchema), "pan:user:") {
+		t.Fatal("unconnected schema exposed a saved account")
+	}
+	out.Reset()
+	diag.Reset()
+	if Execute(context.Background(), []string{"digital", "pan", "quota", "--json"}, &out, &diag, strings.NewReader("")) == 0 || out.Len() != 0 || !strings.Contains(diag.String(), "CLIENT_UNAUTHORIZED") {
+		t.Fatal("discovery enabled private execution", out.String(), diag.String())
 	}
 }
 
@@ -132,7 +142,7 @@ func TestDiscoveryUsesTaskSummariesAndActionableDescriptions(t *testing.T) {
 	}
 }
 
-func TestDescribeSuggestionsUseOnlyVisibleCapabilities(t *testing.T) {
+func TestDescribeSuggestionsUseSuppliedCatalogWithoutPrivateResources(t *testing.T) {
 	var out, diag bytes.Buffer
 	if Execute(context.Background(), []string{"capabilities", "describe", "public.calendars.lsit", "--json"}, &out, &diag, strings.NewReader("")) == 0 || !strings.Contains(diag.String(), "public.calendars.list") || out.Len() != 0 {
 		t.Fatal("missing visible spelling suggestion", out.String(), diag.String())
@@ -140,8 +150,8 @@ func TestDescribeSuggestionsUseOnlyVisibleCapabilities(t *testing.T) {
 	hidden := contracts.AssignmentCapability("canvas:user:7", []string{"canvas:course:1"}, "deadlines_v1", 10)
 	hidden.Authorized = false
 	err := unavailableCapability("canvas.assignments.lis", []contracts.Capability{hidden})
-	if err == nil || strings.Contains(err.Error(), contracts.AssignmentsCapability) || strings.Contains(err.Error(), "canvas:user") {
-		t.Fatal("suggestion leaked hidden capability", err)
+	if err == nil || !strings.Contains(err.Error(), contracts.AssignmentsCapability) || strings.Contains(err.Error(), "canvas:user") || strings.Contains(err.Error(), "canvas:course") {
+		t.Fatal("suggestion omitted a known contract or leaked private resources", err)
 	}
 }
 

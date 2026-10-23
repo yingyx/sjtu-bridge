@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/app"
+	"github.com/yingyx/sjtu-bridge/internal/capabilities"
 	"github.com/yingyx/sjtu-bridge/internal/engine"
 	"github.com/yingyx/sjtu-bridge/internal/servicecatalog"
 )
@@ -22,8 +23,13 @@ func New(options Options) (*Engine, error) {
 	}
 	return &Engine{core: core, close: close}, nil
 }
-func (e *Engine) Close()                               { e.close() }
-func (e *Engine) Capabilities() []contracts.Capability { return e.core.Capabilities() }
+func (e *Engine) Close() { e.close() }
+
+// Capabilities describes all implemented contracts. Authorized indicates local
+// executability; personal entries require a separately granted Broker connection.
+func (e *Engine) Capabilities() []contracts.Capability {
+	return capabilities.Catalog(e.core.Capabilities())
+}
 
 // Services searches reviewed task locators, including tasks with no executable
 // capability. Available actions are projected from this public Engine's catalog.

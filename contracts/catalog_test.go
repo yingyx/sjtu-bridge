@@ -35,7 +35,7 @@ func TestDiscoveryRejectsUnknownTaxonomyButAllowsEmptyMatches(t *testing.T) {
 	}
 }
 
-func TestTaskSearchUsesOnlyAuthorizedPositiveMetadata(t *testing.T) {
+func TestTaskSearchUsesSuppliedPositiveMetadataWithoutGrantingAccess(t *testing.T) {
 	public := PublicCapabilities()
 	for i := range public {
 		public[i].Authorized = true
@@ -71,13 +71,11 @@ func TestTaskSearchUsesOnlyAuthorizedPositiveMetadata(t *testing.T) {
 			}
 		})
 	}
-	// The global catalog must never reveal a private capability to public-only
-	// callers, nor resurrect a revoked/unauthorized entry supplied by an adapter.
-	for _, source := range [][]Capability{public, append(public, func() Capability { c := private; c.Authorized = false; return c }())} {
-		got, err := FilterCapabilities(source, CapabilityFilter{Query: "作业"})
-		if err != nil || len(got) != 0 {
-			t.Fatalf("private entry leaked: %v %v", got, err)
-		}
+	// Search preserves the supplied authority flag; discovery is not a grant.
+	unconfigured := AssignmentMetadata()
+	got, err := FilterCapabilities(append(public, unconfigured), CapabilityFilter{Query: "作业"})
+	if err != nil || len(got) != 1 || got[0].Authorized || len(got[0].InputSchema) != 0 {
+		t.Fatalf("discovery fabricated authority or resources: %v %v", got, err)
 	}
 	for _, q := range []string{strings.Repeat("作", 257), string([]byte{0xff})} {
 		if _, err := FilterCapabilities(caps, CapabilityFilter{Query: q}); err == nil {
@@ -99,10 +97,13 @@ func TestCatalogSummaryAndDetailIsolation(t *testing.T) {
 	if summaries[0].CLICommand != "sjtu learning canvas assignments list" || summaries[0].MCPTool != "learning_canvas_assignments_list" {
 		t.Fatal("missing invocation mapping")
 	}
-	for _, absent := range []string{"aliases", "keywords", "authorized", "credentials", "effects", "execution_rule", "provider", "contract_version"} {
+	for _, absent := range []string{"aliases", "keywords", "effects", "execution_rule", "provider", "contract_version"} {
 		if strings.Contains(string(raw), `"`+absent+`"`) {
 			t.Fatalf("summary contains detailed metadata %q: %s", absent, raw)
 		}
+	}
+	if !summaries[0].Authorized || !summaries[0].AuthorizationRequired || !reflect.DeepEqual(summaries[0].Credentials, []string{"CanvasToken"}) || !reflect.DeepEqual(summaries[0].GrantScope, []string{"capability", "credential", "account", "courses", "view", "limit"}) {
+		t.Fatal("missing setup requirements", summaries[0])
 	}
 	if summaries[0].Description != "查询已授权 Canvas 课程的作业及个性化截止时间，仅返回获准的固定字段视图。" {
 		t.Fatal("summary is not one task sentence", summaries[0].Description)
@@ -147,11 +148,11 @@ func TestSearchRanksTasksAheadOfClassification(t *testing.T) {
 	for _, c := range got {
 		ids = append(ids, c.ID)
 	}
-	if !reflect.DeepEqual(ids, []string{"d.alias", "c.title", "b.keyword", "a.classification"}) {
+	if !reflect.DeepEqual(ids, []string{"d.alias", "private.needle", "c.title", "b.keyword", "a.classification"}) {
 		t.Fatal(ids)
 	}
 	listed, err := FilterCapabilities(custom, CapabilityFilter{})
-	if err != nil || len(listed) != 4 || listed[0].ID != "a.classification" || listed[3].ID != "d.alias" {
+	if err != nil || len(listed) != 5 || listed[0].ID != "a.classification" || listed[4].ID != "private.needle" {
 		t.Fatal("list ordering changed", listed, err)
 	}
 	for i, j := 0, len(custom)-1; i < j; i, j = i+1, j-1 {

@@ -234,7 +234,8 @@ func AssignmentMetadata() Capability {
 }
 
 // PublicCapabilities returns definitions; the public Engine supplies schemas
-// and authorization. Private definitions are never added to public discovery.
+// and authorization. Personal discovery is assembled separately from reviewed
+// contracts, without loading saved credentials or account/resource values.
 func PublicCapabilities() []Capability {
 	result := []Capability{}
 	for _, c := range catalog {
@@ -252,7 +253,8 @@ type CapabilityFilter struct {
 	Service   string
 }
 
-// FilterCapabilities only searches the caller's already authorized catalog.
+// FilterCapabilities searches the supplied discovery snapshot, independently
+// of execution authority. Callers choose a static or application-scoped catalog.
 // Terms are case-insensitive substrings and all terms must match. Searches rank
 // exact tasks before keywords and classification; lists remain ordered by ID.
 // No network, database, or semantic model is involved.
@@ -294,7 +296,7 @@ func FilterCapabilities(caps []Capability, filter CapabilityFilter) ([]Capabilit
 	result := []Capability{}
 	scores := map[string]int{}
 	for _, c := range caps {
-		if !c.Authorized || (service != "" && !strings.EqualFold(service, c.Service)) {
+		if service != "" && !strings.EqualFold(service, c.Service) {
 			continue
 		}
 		paths := append([]TaskPath{{c.Category, c.TaskGroup}}, c.CrossListings...)
@@ -367,14 +369,18 @@ func capabilitySearchScore(c Capability, terms []string) (int, bool) {
 // CapabilitySummary is the task-oriented discovery view. Execution policy and
 // full contracts remain available separately and are never inferred from it.
 type CapabilitySummary struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	CLICommand  string   `json:"cli_command"`
-	MCPTool     string   `json:"mcp_tool"`
-	Delivery    Delivery `json:"delivery"`
-	Category    string   `json:"category"`
-	Service     string   `json:"service"`
+	ID                    string   `json:"id"`
+	Title                 string   `json:"title"`
+	Description           string   `json:"description"`
+	CLICommand            string   `json:"cli_command"`
+	MCPTool               string   `json:"mcp_tool"`
+	Delivery              Delivery `json:"delivery"`
+	Category              string   `json:"category"`
+	Service               string   `json:"service"`
+	Credentials           []string `json:"credentials"`
+	AuthorizationRequired bool     `json:"authorization_required"`
+	GrantScope            []string `json:"grant_scope"`
+	Authorized            bool     `json:"authorized"`
 }
 
 // CapabilitySummaries returns only task selection and invocation information.
@@ -391,9 +397,23 @@ func CapabilitySummaries(caps []Capability) []CapabilitySummary {
 			ID: c.ID, Title: c.Title, Description: description,
 			CLICommand: c.CLICommand, MCPTool: c.MCPTool, Delivery: c.Delivery,
 			Category: c.Category, Service: c.Service,
+			Credentials: c.Credentials, AuthorizationRequired: c.ExecutionRule == GrantExecution,
+			GrantScope: CapabilityGrantScope(c), Authorized: c.Authorized,
 		})
 	}
 	return result
+}
+
+// CapabilityGrantScope describes required grant fields, never their saved values.
+func CapabilityGrantScope(c Capability) []string {
+	if c.ExecutionRule != GrantExecution {
+		return []string{}
+	}
+	resource := "resources"
+	if c.Provider == "canvas" {
+		resource = "courses"
+	}
+	return []string{"capability", "credential", "account", resource, "view", "limit"}
 }
 
 func utilityMetadata(id, title, provider string, aliases []string, description string) Capability {

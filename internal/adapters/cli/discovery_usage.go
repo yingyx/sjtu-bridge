@@ -31,9 +31,26 @@ func discoveryConnectionSuffix(connected bool) string {
 func discoverySummaries(caps []contracts.Capability, connected bool) []contracts.CapabilitySummary {
 	summaries := contracts.CapabilitySummaries(caps)
 	for i := range summaries {
-		summaries[i].CLICommand += discoveryConnectionSuffix(connected)
+		summaries[i].CLICommand += discoveryConnectionSuffix(connected || summaries[i].AuthorizationRequired)
 	}
 	return summaries
+}
+
+func capabilityAccessLabel(c contracts.CapabilitySummary) string {
+	if !c.AuthorizationRequired {
+		return "凭据：无需；授权：无需"
+	}
+	resource := "资源"
+	for _, field := range c.GrantScope {
+		if field == "courses" {
+			resource = "课程"
+		}
+	}
+	state := "需配置已授权应用连接；本次未检查保存的凭据"
+	if c.Authorized {
+		state = "当前应用已获授权，调用时重新校验"
+	}
+	return fmt.Sprintf("凭据：%s；授权：按应用、能力、凭据、本人账号、%s、视图和限额；%s", strings.Join(c.Credentials, " / "), resource, state)
 }
 
 func deliveryLabel(delivery contracts.Delivery) string {
@@ -83,8 +100,11 @@ func writeCapabilityUsage(out io.Writer, root *cobra.Command, c contracts.Capabi
 	}
 	var text strings.Builder
 	fmt.Fprintf(&text, "%s · %s\n%s\n\n命令：%s\n", c.Title, deliveryLabel(c.Delivery), usage.Description, usage.CLICommand)
-	if connected {
+	fmt.Fprintln(&text, capabilityAccessLabel(usage.CapabilitySummary))
+	if connection != "" {
 		fmt.Fprintln(&text, "连接：使用与发现时相同的应用连接文件绝对路径")
+	} else if c.DataClass == contracts.PersonalData {
+		fmt.Fprintln(&text, "配置：先核验并导入凭据，用 sjtu auth status 查看本人账号和凭据ID，再创建应用并授予上述范围，最后使用 --connection 调用。管理命令：sjtu auth --help；sjtu apps create --help；sjtu permissions grant --help。")
 	}
 	fmt.Fprintln(&text, "\n参数：")
 	for _, name := range names {
@@ -100,7 +120,7 @@ func writeCapabilityUsage(out io.Writer, root *cobra.Command, c contracts.Capabi
 		}
 		fmt.Fprintf(&text, "  --%s  %s\n", cliFlagName(name), description)
 	}
-	detailCommand := "sjtu capabilities describe " + c.ID + discoveryConnectionSuffix(connected)
+	detailCommand := "sjtu capabilities describe " + c.ID + discoveryConnectionSuffix(connection != "")
 	fmt.Fprintf(&text, "\n示例（替换占位值）：\n  %s\n\n完整契约：%s --verbose\n", usage.Example, detailCommand)
 	_, err = io.WriteString(out, text.String())
 	return err
@@ -143,7 +163,7 @@ func quoteCLIValue(value string) string {
 }
 
 func unavailableCapability(id string, caps []contracts.Capability) error {
-	message := "当前连接中没有此能力。使用 sjtu capabilities search 关键词 查找可用能力。"
+	message := "当前目录中没有此能力。使用 sjtu capabilities search 关键词 查找已接入能力；带连接时仅显示应用获准范围。"
 	if !utf8.ValidString(id) || utf8.RuneCountInString(id) > 256 {
 		return contracts.Fail("INVALID_ARGUMENT", "能力 ID 必须是有效 UTF-8，且不超过 256 个字符")
 	}
@@ -153,9 +173,6 @@ func unavailableCapability(id string, caps []contracts.Capability) error {
 	}
 	var candidates []candidate
 	for _, c := range caps {
-		if !c.Authorized {
-			continue
-		}
 		distance := capabilityIDDistance(strings.ToLower(id), strings.ToLower(c.ID))
 		if distance <= 3 {
 			candidates = append(candidates, candidate{c.ID, distance})

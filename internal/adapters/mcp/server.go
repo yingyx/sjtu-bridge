@@ -21,10 +21,13 @@ type API interface {
 func New(api API) *sdk.Server {
 	server := sdk.NewServer(&sdk.Implementation{Name: "sjtu-bridge", Version: "0.3.0"}, nil)
 	for _, capability := range api.Capabilities() {
-		if !capability.Authorized || !policy.ExecutableRead(capability) {
+		if !policy.ExecutableRead(capability) {
 			continue
 		}
 		server.AddTool(capabilityTool(capability), func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			if !capability.Authorized {
+				return remoteFailure(contracts.Fail("PERMISSION_DENIED", "Personal capability requires an authorized Broker application connection")), nil
+			}
 			result, err := api.Invoke(ctx, contracts.Invocation{Capability: capability.ID, Input: request.Params.Arguments})
 			if err != nil {
 				safe := contracts.Fail("UPSTREAM_UNAVAILABLE", "Request failed")
@@ -48,6 +51,7 @@ func New(api API) *sdk.Server {
 
 func capabilityTool(capability contracts.Capability) *sdk.Tool {
 	description := []string{capability.Description}
+	description = append(description, fmt.Sprintf("所需凭据：%v；应用授权范围：%v；当前可调用：%t。未连接的个人契约仅供发现与配置，调用需改用已授权的 Broker 连接。", capability.Credentials, contracts.CapabilityGrantScope(capability), capability.Authorized))
 	description = append(description, "能力 ID："+capability.ID, "CLI：sjtu "+strings.Join(contracts.CLIPath(capability.ID), " "))
 	if capability.CategoryLabel != "" {
 		description = append(description, "分类："+capability.CategoryLabel+" ("+capability.Category+")")
@@ -69,10 +73,14 @@ func capabilityTool(capability contracts.Capability) *sdk.Tool {
 	if len(capability.Keywords) > 0 {
 		description = append(description, "关键词："+strings.Join(capability.Keywords, "、"))
 	}
+	var outputSchema any
+	if len(capability.OutputSchema) > 0 {
+		outputSchema = capability.OutputSchema
+	}
 	return &sdk.Tool{
 		Name: contracts.MCPToolName(capability.ID), Title: capability.Title,
 		Description: strings.Join(description, "\n"),
-		InputSchema: capability.InputSchema, OutputSchema: capability.OutputSchema,
+		InputSchema: capability.InputSchema, OutputSchema: outputSchema,
 		Annotations: &sdk.ToolAnnotations{ReadOnlyHint: capability.IsReadOnly(), IdempotentHint: capability.IsReadOnly()},
 	}
 }
