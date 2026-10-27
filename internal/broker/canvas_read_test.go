@@ -53,7 +53,7 @@ func TestCanvasReadFamilyThroughBrokerAndFixedViews(t *testing.T) {
 		e := h.b.invoke(ctx, h.a, inv, func(raw []byte) error { result = append([]byte{}, raw...); return nil })
 		return result, e
 	}
-	for _, id := range contracts.CanvasCapabilityIDs() {
+	for index, id := range contracts.CanvasCapabilityIDs() {
 		t.Run(id, func(t *testing.T) {
 			r, _ := contracts.CanvasRules(id)
 			_, e := h.b.Manage(ctx, AdminRequest{Action: "grant", ClientID: "a", CredentialID: h.cred, AccountRef: "canvas:user:7", Capability: id, Courses: []string{"canvas:course:1"}, View: r.View, Limit: 2})
@@ -61,7 +61,11 @@ func TestCanvasReadFamilyThroughBrokerAndFixedViews(t *testing.T) {
 				t.Fatal("grant", e)
 			}
 			caps, e := h.b.Engine.Capabilities(h.a)
-			if e != nil || len(caps) != 1 || caps[0].ID != id {
+			found := false
+			for _, cap := range caps {
+				found = found || cap.ID == id
+			}
+			if e != nil || len(caps) != index+2 || !found {
 				t.Fatal("discovery", e)
 			}
 			q := contracts.CanvasQuery{AccountRef: "canvas:user:7", CourseRef: "canvas:course:1", View: r.View, Limit: 2}

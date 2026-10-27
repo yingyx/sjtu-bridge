@@ -44,6 +44,29 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		return write(map[string]string{"status": "initialized"})
 	}})
 	bc.AddCommand(&cobra.Command{Use: "run", Short: "在前台运行单实例 Broker", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return broker.Run(cmd.Context()) }})
+	var applyUpgrade bool
+	upgradeCmd := &cobra.Command{Use: "upgrade", Short: "离线预检旧版状态；显式确认后备份并升级", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if e := auth.RequireTerminal(input); e != nil {
+			return e
+		}
+		preview, e := broker.UpgradeStorage(false)
+		if e != nil {
+			return e
+		}
+		if !applyUpgrade {
+			return write(preview)
+		}
+		if e = confirm(input, diag, preview); e != nil {
+			return e
+		}
+		result, e := broker.UpgradeStorage(true)
+		if e != nil {
+			return e
+		}
+		return write(result)
+	}}
+	upgradeCmd.Flags().BoolVar(&applyUpgrade, "apply", false, "确认后备份旧快照和密文，升级状态格式；须先停止 Broker")
+	bc.AddCommand(upgradeCmd)
 	root.AddCommand(bc)
 	authCmd := &cobra.Command{Use: "auth", GroupID: "management", Short: "用户凭据导入、移除与会话诊断"}
 	provider, label := "", "main"
@@ -119,7 +142,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	check.Flags().StringVar(&checkProvider, "provider", "", "Diagnostic provider (jaccount)")
 	authCmd.AddCommand(check)
 	ownerCommand := func(use, action string, q *broker.AdminRequest, mutating bool) *cobra.Command {
-		descriptions := map[string]string{"status": "查看已保存凭据、应用与授权状态", "credential_remove": "移除凭据并撤销关联应用授权", "courses": "列出已验证 Canvas 账号的课程", "resources": "发现本人电费绑定房间或水源可见板块资源", "app_revoke": "撤销应用连接及其授权", "grant": "授予应用指定账号、资源和视图的访问权", "grant_revoke": "撤销应用当前的个人能力授权"}
+		descriptions := map[string]string{"status": "查看已保存凭据、应用与授权状态", "credential_remove": "移除凭据并撤销关联应用授权", "courses": "列出已验证 Canvas 账号的课程", "resources": "发现本人电费绑定房间或水源可见板块资源", "app_revoke": "撤销应用连接及其授权", "grant": "添加或更新应用的一项能力授权", "grant_revoke": "按授权 ID 撤销单项能力授权"}
 		return &cobra.Command{Use: use, Short: descriptions[action], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if e := auth.RequireTerminal(input); e != nil {
 				return e
@@ -212,7 +235,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	grant.Flags().StringVar(&g.CredentialID, "credential", "", "Verified credential ID")
 	grant.Flags().StringVar(&g.AccountRef, "account", "", "Stable account_ref (canvas:user:ID)")
 	grant.Flags().StringSliceVar(&g.Courses, "courses", nil, "Exact course_refs, comma separated")
-	grant.Flags().StringVar(&g.Capability, "capability", contracts.AssignmentsCapability, "Exact capability ID; one active grant per app")
+	grant.Flags().StringVar(&g.Capability, "capability", contracts.AssignmentsCapability, "Exact capability ID; upsert one grant per app and capability, preserving other capabilities")
 	grant.Flags().StringSliceVar(&g.Resources, "resources", nil, "Exact portal resource_refs; use auth resources for the verified electricity room")
 	grant.Flags().StringVar(&g.View, "view", "", "Exact fixed view from capabilities describe; each capability requires its own grant")
 	grant.Flags().IntVar(&g.Limit, "limit", 20, "Per-call item cap (1-100)")
@@ -223,8 +246,9 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	permissions.AddCommand(grant)
 	r := &broker.AdminRequest{}
 	revokeGrant := ownerCommand("revoke", "grant_revoke", r, true)
-	revokeGrant.Flags().StringVar(&r.ClientID, "app", "", "Application ID")
-	_ = revokeGrant.MarkFlagRequired("app")
+	revokeGrant.Flags().StringVar(&r.GrantID, "grant", "", "Exact grant ID from auth status")
+	revokeGrant.Flags().StringVar(&r.ClientID, "app", "", "Optional application ID to verify grant ownership")
+	_ = revokeGrant.MarkFlagRequired("grant")
 	permissions.AddCommand(revokeGrant)
 	root.AddCommand(permissions)
 	assignmentMetadata := contracts.AssignmentMetadata()

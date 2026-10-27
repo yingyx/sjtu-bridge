@@ -42,7 +42,7 @@ func TestConnectionChecksAndUnavailable(t *testing.T) {
 	defer cancel()
 	_, e := c.Assignments(ctx, contracts.AssignmentQuery{AccountRef: "canvas:user:7", CourseRef: "canvas:course:1", View: "summary_v1", Limit: 1})
 	var v *contracts.Error
-	if !errors.As(e, &v) || (v.Code != "BROKER_UNAVAILABLE" && v.Code != "CANCELED") {
+	if !errors.As(e, &v) || (v.Code != "BROKER_UNAVAILABLE" && v.Code != "CANCELED" && v.Code != "TIMEOUT") {
 		t.Fatal("unavailable Broker was not explicit", e)
 	}
 	for _, run := range []func() error{

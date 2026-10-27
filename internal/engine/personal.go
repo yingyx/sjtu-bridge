@@ -23,8 +23,9 @@ type Auditor interface {
 var assignmentRef = regexp.MustCompile(`^canvas:assignment:[1-9][0-9]{0,17}$`)
 
 type active struct {
-	AppID, CredentialID string
-	Cancel              context.CancelFunc
+	AppID, GrantID, CredentialID string
+	GrantGeneration              uint64
+	Cancel                       context.CancelFunc
 }
 
 // Personal runs only inside the Broker. No adapter constructs it with a secret.
@@ -73,16 +74,26 @@ func (p *Personal) Do(ctx context.Context, fn func(context.Context) error) error
 	return fn(ctx)
 }
 func (p *Personal) Invalidate(app, credential string) {
+	p.invalidate(app, credential, "", 0)
+}
+
+func (p *Personal) InvalidateGrant(grant string, throughGeneration uint64) {
+	if grant != "" {
+		p.invalidate("", "", grant, throughGeneration)
+	}
+}
+
+func (p *Personal) invalidate(app, credential, grant string, throughGeneration uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for id, a := range p.active {
-		if (app == "" || app == a.AppID) && (credential == "" || credential == a.CredentialID) {
+		if (app == "" || app == a.AppID) && (credential == "" || credential == a.CredentialID) && (grant == "" || (grant == a.GrantID && a.GrantGeneration <= throughGeneration)) {
 			a.Cancel()
 			delete(p.active, id)
 		}
 	}
 	for id, c := range p.cursors {
-		if (app == "" || app == c.Key.AppID) && (credential == "" || credential == c.Key.CredentialID) {
+		if (app == "" || app == c.Key.AppID) && (credential == "" || credential == c.Key.CredentialID) && (grant == "" || (grant == c.Key.GrantID && c.Key.GrantGen <= throughGeneration)) {
 			delete(p.cursors, id)
 		}
 	}
@@ -93,28 +104,30 @@ func (p *Personal) Capabilities(token string) ([]contracts.Capability, error) {
 	return caps, e
 }
 func (p *Personal) Discover(token string, send func([]contracts.Capability) error) error {
-	return p.Store.Discover(token, func(l *storage.Lease) error {
+	return p.Store.Discover(token, func(leases []storage.Lease) error {
 		caps := []contracts.Capability{}
-		if l != nil && l.Grant.Capability == contracts.AssignmentsCapability && policy.PersonalAllowed(p.capability) {
-			g := l.Grant
-			scoped := contracts.AssignmentCapability(g.AccountRef, g.Courses, g.View, g.Limit)
-			c := contracts.CloneCapability(p.capability)
-			c.Authorized, c.InputSchema, c.OutputSchema = true, scoped.InputSchema, scoped.OutputSchema
-			caps = append(caps, c)
-		}
-		if l != nil && l.Grant.Capability != contracts.AssignmentsCapability {
-			g := l.Grant
-			if _, canvasRead := contracts.CanvasRules(g.Capability); canvasRead {
-				if _, available := p.Provider.(domain.CanvasReader); available {
-					if c, ok := contracts.CanvasCapability(g.Capability, g.AccountRef, g.Courses, g.View, g.Limit); ok && policy.PersonalAllowed(c) {
-						caps = append(caps, c)
-					}
-				}
-				return send(caps)
-			}
-			c, ok := contracts.CampusCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit)
-			if ok && policy.PersonalAllowed(c) && p.CampusProviders[c.Provider] != nil {
+		for _, l := range leases {
+			if l.Grant.Capability == contracts.AssignmentsCapability && policy.PersonalAllowed(p.capability) {
+				g := l.Grant
+				scoped := contracts.AssignmentCapability(g.AccountRef, g.Courses, g.View, g.Limit)
+				c := contracts.CloneCapability(p.capability)
+				c.Authorized, c.InputSchema, c.OutputSchema = true, scoped.InputSchema, scoped.OutputSchema
 				caps = append(caps, c)
+			}
+			if l.Grant.Capability != contracts.AssignmentsCapability {
+				g := l.Grant
+				if _, canvasRead := contracts.CanvasRules(g.Capability); canvasRead {
+					if _, available := p.Provider.(domain.CanvasReader); available {
+						if c, ok := contracts.CanvasCapability(g.Capability, g.AccountRef, g.Courses, g.View, g.Limit); ok && policy.PersonalAllowed(c) {
+							caps = append(caps, c)
+						}
+					}
+					continue
+				}
+				c, ok := contracts.CampusCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit)
+				if ok && policy.PersonalAllowed(c) && p.CampusProviders[c.Provider] != nil {
+					caps = append(caps, c)
+				}
 			}
 		}
 		return send(caps)

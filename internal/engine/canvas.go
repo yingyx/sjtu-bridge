@@ -47,12 +47,14 @@ func (p *Personal) invokeCanvas(ctx context.Context, token string, inv contracts
 	if r.Directory {
 		// Directory queries use an existing course as the publication fence;
 		// the full grant is passed only inside the Broker and bound by generation.
-		e = p.Store.Discover(token, func(l *storage.Lease) error {
-			if l == nil || l.Grant.Capability != inv.Capability || len(l.Grant.Courses) == 0 {
-				return contracts.Fail("PERMISSION_DENIED", "Course directory is not authorized")
+		e = p.Store.Discover(token, func(leases []storage.Lease) error {
+			for _, l := range leases {
+				if l.Grant.Capability == inv.Capability && len(l.Grant.Courses) > 0 {
+					resource = l.Grant.Courses[0]
+					return nil
+				}
 			}
-			resource = l.Grant.Courses[0]
-			return nil
+			return contracts.Fail("PERMISSION_DENIED", "Course directory is not authorized")
 		})
 		if e != nil {
 			return e

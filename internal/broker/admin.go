@@ -18,6 +18,7 @@ type AdminRequest struct {
 	Resources          []string `json:"resource_refs,omitempty"`
 	Action             string   `json:"action"`
 	ClientID           string   `json:"client_id,omitempty"`
+	GrantID            string   `json:"grant_id,omitempty"`
 	Provider           string   `json:"provider,omitempty"`
 	Secret             []byte   `json:"secret,omitempty"`
 	Label              string   `json:"label,omitempty"`
@@ -60,7 +61,14 @@ func (b *Broker) changed(action string, q AdminRequest, err error) error {
 		return err
 	}
 	s := b.Store.Snapshot()
-	g := s.Grants[q.ClientID]
+	g := s.Grants[q.GrantID]
+	if g.ID == "" {
+		g, _ = s.GrantFor(q.ClientID, q.Capability)
+	}
+	clientID := q.ClientID
+	if g.ID != "" {
+		clientID = g.ClientID
+	}
 	account := g.AccountRef
 	if c, ok := s.Credentials[q.CredentialID]; ok {
 		account = c.AccountRef
@@ -68,7 +76,7 @@ func (b *Broker) changed(action string, q AdminRequest, err error) error {
 	if action == "credential_import" {
 		account = q.ExpectedAccount
 	}
-	if e := b.Engine.Audit.Write(storage.AuditEvent{ClientID: s.Apps[q.ClientID].ID, AccountRef: account, Capability: g.Capability, View: g.View, Decision: action, Code: "OK", Revision: s.Revision}); e != nil {
+	if e := b.Engine.Audit.Write(storage.AuditEvent{ClientID: s.Apps[clientID].ID, GrantID: g.ID, GrantGeneration: g.Generation, AccountRef: account, Capability: g.Capability, View: g.View, Decision: action, Code: "OK", Revision: s.Revision}); e != nil {
 		return contracts.Fail("AUDIT_UNAVAILABLE", "State committed; audit unavailable")
 	}
 	return nil
@@ -211,8 +219,6 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		b.adminMu.Lock()
 		defer b.adminMu.Unlock()
 		if source.ID != "" {
-			unlockSource := b.Store.Fence("credential", source.ID)
-			defer unlockSource()
 			if e = b.Store.CheckSourceCredential(source); e != nil {
 				return nil, e
 			}
@@ -243,8 +249,13 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		if e = b.Store.Encrypt(c, secret); e != nil {
 			return nil, e
 		}
-		unlock := b.Store.Fence("credential", old.ID)
+		unlock := b.Store.FenceCredentials(source.ID, old.ID)
 		defer unlock()
+		if source.ID != "" {
+			if e = b.Store.CheckSourceCredential(source); e != nil {
+				return nil, e
+			}
+		}
 		e = b.Store.Update([]string{"credential:" + old.ID}, func(s *storage.State) error {
 			if !sourceActive(*s) {
 				return contracts.Fail("AUTH_REQUIRED", "Source credential changed during import")
@@ -315,10 +326,12 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		defer unlock()
 		e = b.Store.Update([]string{"app:" + q.ClientID}, func(s *storage.State) error {
 			s.Apps[a.ID] = a
-			if g, ok := s.Grants[a.ID]; ok {
-				g.Active = false
-				g.Generation++
-				s.Grants[a.ID] = g
+			for id, g := range s.Grants {
+				if g.ClientID == a.ID {
+					g.Active = false
+					g.Generation++
+					s.Grants[id] = g
+				}
 			}
 			return nil
 		})
@@ -373,34 +386,30 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		if expires.After(a.Expires) {
 			expires = a.Expires
 		}
-		previousGeneration := s.Grants[a.ID].Generation
-		g := storage.Grant{ID: local.Random(), ClientID: a.ID, Capability: contracts.AssignmentsCapability, Version: "1", AccountRef: c.AccountRef, CredentialID: c.ID, Courses: append([]string(nil), q.Courses...), View: q.View, Limit: q.Limit, Generation: previousGeneration + 1, Active: true, Expires: expires}
+		g := storage.Grant{ClientID: a.ID, Capability: contracts.AssignmentsCapability, Version: "1", AccountRef: c.AccountRef, CredentialID: c.ID, Courses: append([]string(nil), q.Courses...), View: q.View, Limit: q.Limit, Active: true, Expires: expires}
 		if canvasRead {
 			g.Capability = q.Capability
 		}
-		b.adminMu.Lock()
-		defer b.adminMu.Unlock()
-		unlock := b.Store.Fence("app", a.ID)
-		defer unlock()
-		e = b.Store.Update([]string{"grant:" + a.ID}, func(s *storage.State) error {
-			if !s.Apps[a.ID].Active || !time.Now().Before(s.Apps[a.ID].Expires) || !s.Credentials[c.ID].Active || s.Apps[a.ID].Generation != a.Generation || s.Grants[a.ID].Generation != previousGeneration {
-				return contracts.Fail("PERMISSION_DENIED", "App or credential changed during grant")
-			}
-			g.Generation = s.Grants[a.ID].Generation + 1
-			s.Grants[a.ID] = g
-			return nil
-		})
-		b.Engine.Invalidate(a.ID, "")
-		if e = b.changed("grant", q, e); e != nil {
-			return nil, e
-		}
-		return g, nil
+		return b.saveGrant(q, s, g)
 	case "app_revoke", "grant_revoke", "credential_remove":
 		b.adminMu.Lock()
 		defer b.adminMu.Unlock()
 		kind, id := "app", q.ClientID
+		var grantGeneration uint64
 		if q.Action == "credential_remove" {
 			kind, id = "credential", q.CredentialID
+			if _, exists := b.Store.Snapshot().Credentials[id]; id == "" || !exists {
+				return nil, contracts.Fail("INVALID_ARGUMENT", "Existing credential_id is required")
+			}
+		} else if q.Action == "grant_revoke" {
+			kind, id = "grant", q.GrantID
+			grant, exists := b.Store.Snapshot().Grants[id]
+			if !exists || id == "" || (q.ClientID != "" && q.ClientID != grant.ClientID) {
+				return nil, contracts.Fail("INVALID_ARGUMENT", "Matching grant_id is required")
+			}
+			grantGeneration = grant.Generation
+		} else if _, exists := b.Store.Snapshot().Apps[id]; id == "" || !exists {
+			return nil, contracts.Fail("INVALID_ARGUMENT", "Existing client_id is required")
 		}
 		unlock := b.Store.Fence(kind, id)
 		defer unlock()
@@ -414,15 +423,17 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 				a.Active = false
 				a.Generation++
 				s.Apps[id] = a
-				if g, ok := s.Grants[id]; ok {
-					g.Active = false
-					g.Generation++
-					s.Grants[id] = g
+				for grantID, g := range s.Grants {
+					if g.ClientID == id {
+						g.Active = false
+						g.Generation++
+						s.Grants[grantID] = g
+					}
 				}
 			case "grant_revoke":
 				g, ok := s.Grants[id]
-				if !ok {
-					return contracts.Fail("INVALID_ARGUMENT", "Unknown grant")
+				if !ok || id == "" || (q.ClientID != "" && q.ClientID != g.ClientID) {
+					return contracts.Fail("INVALID_ARGUMENT", "Matching grant_id is required")
 				}
 				g.Active = false
 				g.Generation++
@@ -447,6 +458,8 @@ func (b *Broker) manage(ctx context.Context, q AdminRequest) (any, error) {
 		})
 		if kind == "app" {
 			b.Engine.Invalidate(id, "")
+		} else if kind == "grant" {
+			b.Engine.InvalidateGrant(id, grantGeneration)
 		} else {
 			b.Engine.Invalidate("", id)
 			if e == nil {

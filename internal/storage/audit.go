@@ -13,17 +13,19 @@ import (
 )
 
 type AuditEvent struct {
-	Time       time.Time `json:"time"`
-	RequestID  string    `json:"request_id,omitempty"`
-	ClientID   string    `json:"client_id,omitempty"`
-	AccountRef string    `json:"account_ref,omitempty"`
-	Capability string    `json:"capability,omitempty"`
-	View       string    `json:"view,omitempty"`
-	Decision   string    `json:"decision"`
-	Code       string    `json:"code"`
-	ElapsedMS  int64     `json:"elapsed_ms"`
-	Bytes      int       `json:"bytes"`
-	Revision   uint64    `json:"state_revision,omitempty"`
+	Time            time.Time `json:"time"`
+	RequestID       string    `json:"request_id,omitempty"`
+	ClientID        string    `json:"client_id,omitempty"`
+	GrantID         string    `json:"grant_id,omitempty"`
+	GrantGeneration uint64    `json:"grant_generation,omitempty"`
+	AccountRef      string    `json:"account_ref,omitempty"`
+	Capability      string    `json:"capability,omitempty"`
+	View            string    `json:"view,omitempty"`
+	Decision        string    `json:"decision"`
+	Code            string    `json:"code"`
+	ElapsedMS       int64     `json:"elapsed_ms"`
+	Bytes           int       `json:"bytes"`
+	Revision        uint64    `json:"state_revision,omitempty"`
 }
 type Audit struct {
 	mu   sync.Mutex

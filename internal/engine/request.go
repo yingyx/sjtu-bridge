@@ -12,10 +12,10 @@ import (
 // cursorKey binds both business query shape and exact authority. Keeping the
 // capability in ReadScope prevents continuation reuse between provider paths.
 type cursorKey struct {
-	AppID, CredentialID       string
-	AppGen, GrantGen, CredGen uint64
-	Scope                     contracts.ReadScope
-	Filter                    string
+	AppID, GrantID, CredentialID string
+	AppGen, GrantGen, CredGen    uint64
+	Scope                        contracts.ReadScope
+	Filter                       string
 }
 
 type cursor struct {
@@ -45,10 +45,12 @@ func (p *Personal) startRequest(ctx context.Context, capability string) (context
 
 func (r *privateRequest) bind(lease storage.Lease, scope contracts.ReadScope, filter string) {
 	r.lease = lease
-	r.key = cursorKey{AppID: lease.App.ID, CredentialID: lease.Credential.ID, AppGen: lease.App.Generation, GrantGen: lease.Grant.Generation, CredGen: lease.Credential.Generation, Scope: scope, Filter: filter}
+	r.key = cursorKey{AppID: lease.App.ID, GrantID: lease.Grant.ID, CredentialID: lease.Credential.ID, AppGen: lease.App.Generation, GrantGen: lease.Grant.Generation, CredGen: lease.Credential.Generation, Scope: scope, Filter: filter}
 	r.event.ClientID, r.event.AccountRef, r.event.View = lease.App.ID, lease.Grant.AccountRef, lease.Grant.View
+	r.event.GrantID = lease.Grant.ID
+	r.event.GrantGeneration = lease.Grant.Generation
 	r.p.mu.Lock()
-	r.p.active[r.id] = active{lease.App.ID, lease.Credential.ID, r.cancel}
+	r.p.active[r.id] = active{AppID: lease.App.ID, GrantID: lease.Grant.ID, GrantGeneration: lease.Grant.Generation, CredentialID: lease.Credential.ID, Cancel: r.cancel}
 	r.p.mu.Unlock()
 }
 

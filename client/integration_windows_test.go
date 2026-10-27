@@ -68,7 +68,8 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "app_create", ClientID: "b", Path: path}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "grant", ClientID: "b", CredentialID: credential.ID, AccountRef: credential.AccountRef, Courses: []string{"canvas:course:1"}, View: "deadlines_v1", Limit: 10}); e != nil {
+	granted, e := b.Manage(ctx, broker.AdminRequest{Action: "grant", ClientID: "b", CredentialID: credential.ID, AccountRef: credential.AccountRef, Courses: []string{"canvas:course:1"}, View: "deadlines_v1", Limit: 10})
+	if e != nil {
 		t.Fatal(e)
 	}
 	c, e := client.Open(path)
@@ -222,7 +223,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 		t.Fatal("MCP projection differs")
 	}
 	// Retaining the MCP connection/tool name never retains revoked permission.
-	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "grant_revoke", ClientID: "b"}); e != nil {
+	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "grant_revoke", ClientID: "b", GrantID: granted.(storage.Grant).ID}); e != nil {
 		t.Fatal(e)
 	}
 	result, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: q})

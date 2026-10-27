@@ -173,7 +173,10 @@ func (b *Broker) Handler() http.Handler {
 			writeError(w, contracts.Fail("PERMISSION_DENIED", "Method denied"))
 			return
 		}
-		e := b.discover(bearer(r), func(caps []contracts.Capability) error { writeJSON(w, caps); return nil })
+		e := b.discover(bearer(r), func(caps []contracts.Capability) error {
+			writeJSONBounded(w, caps, contracts.MaxDiscoveryJSONBytes)
+			return nil
+		})
 		if e != nil {
 			writeError(w, e)
 			return
@@ -331,9 +334,12 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 func writeJSON(w http.ResponseWriter, v any) {
+	writeJSONBounded(w, v, contracts.MaxJSONBytes)
+}
+func writeJSONBounded(w http.ResponseWriter, v any, limit int) {
 	buf, e := json.Marshal(v)
-	if e != nil || len(buf) > contracts.MaxJSONBytes {
-		writeError(w, contracts.Fail("RESPONSE_TOO_LARGE", "Response exceeds 256 KiB"))
+	if e != nil || len(buf) > limit {
+		writeError(w, contracts.Fail("RESPONSE_TOO_LARGE", "Response exceeds endpoint byte limit"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

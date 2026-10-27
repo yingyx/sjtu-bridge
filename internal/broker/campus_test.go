@@ -120,11 +120,11 @@ func TestCampusCapabilityRegistrationAndProjection(t *testing.T) {
 				t.Fatal(e, string(out))
 			}
 			caps, e := h.b.Engine.Capabilities(h.a)
-			if e != nil || len(caps) != 1 || caps[0].ID != id {
-				t.Fatal("grant inherited another capability", e, caps)
+			if e != nil || len(caps) != 2 || caps[0].ID != contracts.AssignmentsCapability || caps[1].ID != id {
+				t.Fatal("independent grants were not both discovered", e, caps)
 			}
-			if _, e = invoke(h.b, h.a, query("summary_v1", "1")); e == nil {
-				t.Fatal("replaced Canvas grant remained active")
+			if _, e = invoke(h.b, h.a, query("summary_v1", "1")); e != nil {
+				t.Fatal("adding campus grant replaced Canvas grant", e)
 			}
 			rules, _ := contracts.CampusRules(id)
 			if !rules.QueryAllowed {
@@ -239,7 +239,7 @@ func TestCampusRevocationDuringProvider(t *testing.T) {
 		close(release)
 		t.Fatal("provider barrier not reached")
 	}
-	_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"})
+	_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", GrantID: h.grantID("a", id)})
 	close(release)
 	if e != nil {
 		t.Fatal(e)
@@ -270,7 +270,11 @@ func TestCampusRevokeAndAuditWithholdResults(t *testing.T) {
 				close(release)
 				t.Fatal("publication barrier not reached")
 			}
-			_, e := h.b.Manage(context.Background(), AdminRequest{Action: action, ClientID: "a", CredentialID: credential})
+			admin := AdminRequest{Action: action, ClientID: "a", CredentialID: credential}
+			if action == "grant_revoke" {
+				admin.GrantID = h.grantID("a", id)
+			}
+			_, e := h.b.Manage(context.Background(), admin)
 			close(release)
 			if e != nil {
 				t.Fatal(e)
@@ -321,7 +325,8 @@ func TestCampusGrantRejectsUnavailableCredentialBeforeIdentity(t *testing.T) {
 			q := AdminRequest{Action: "grant", ClientID: "a", Capability: contracts.TimetableCapability, CredentialID: source.ID, AccountRef: source.AccountRef, Resources: []string{"teaching:term:2026:1"}, View: "schedule_v1", Limit: 10}
 			_, err := h.b.Manage(context.Background(), q)
 			mustCode(t, err, "AUTH_REQUIRED")
-			if provider.identities.Load() != 0 || h.b.Store.Snapshot().Grants["a"].Capability == contracts.TimetableCapability {
+			_, granted := h.b.Store.Snapshot().GrantFor("a", contracts.TimetableCapability)
+			if provider.identities.Load() != 0 || granted {
 				t.Fatal("unavailable credential reached identity or created a grant")
 			}
 		})
@@ -356,7 +361,7 @@ func TestCampusGrantRechecksFailedCredentialRevokeAfterIdentity(t *testing.T) {
 		t.Fatal("failed revoke reported success")
 	}
 	mustCode(t, <-done, "AUTH_REQUIRED")
-	if h.b.Store.Snapshot().Grants["a"].Capability == contracts.TimetableCapability {
+	if _, granted := h.b.Store.Snapshot().GrantFor("a", contracts.TimetableCapability); granted {
 		t.Fatal("grant survived failed credential revoke")
 	}
 }

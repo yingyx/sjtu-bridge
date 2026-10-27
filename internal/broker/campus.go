@@ -6,7 +6,6 @@ import (
 
 	"github.com/yingyx/sjtu-bridge/contracts"
 	"github.com/yingyx/sjtu-bridge/internal/domain"
-	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/policy"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
 )
@@ -66,25 +65,6 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	if expires.After(app.Expires) {
 		expires = app.Expires
 	}
-	previous := s.Grants[app.ID].Generation
-	g := storage.Grant{ID: local.Random(), ClientID: app.ID, Capability: q.Capability, Version: "1", AccountRef: q.AccountRef, CredentialID: credential.ID, Resources: append([]string(nil), q.Resources...), View: q.View, Limit: q.Limit, Generation: previous + 1, Active: true, Expires: expires}
-	b.adminMu.Lock()
-	defer b.adminMu.Unlock()
-	unlock := b.Store.Fence("app", app.ID)
-	defer unlock()
-	if e = b.Store.CheckCredential(credential); e != nil {
-		return nil, e
-	}
-	e = b.Store.Update([]string{"grant:" + app.ID}, func(s *storage.State) error {
-		if !s.Apps[app.ID].Active || !time.Now().Before(s.Apps[app.ID].Expires) || s.Apps[app.ID].Generation != app.Generation || !s.Credentials[credential.ID].Active || s.Credentials[credential.ID].Generation != credential.Generation || s.Grants[app.ID].Generation != previous {
-			return contracts.Fail("PERMISSION_DENIED", "Authorization changed during grant")
-		}
-		s.Grants[app.ID] = g
-		return nil
-	})
-	b.Engine.Invalidate(app.ID, "")
-	if e = b.changed("grant", q, e); e != nil {
-		return nil, e
-	}
-	return g, nil
+	g := storage.Grant{ClientID: app.ID, Capability: q.Capability, Version: "1", AccountRef: q.AccountRef, CredentialID: credential.ID, Resources: append([]string(nil), q.Resources...), View: q.View, Limit: q.Limit, Active: true, Expires: expires}
+	return b.saveGrant(q, s, g)
 }

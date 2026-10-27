@@ -9,6 +9,10 @@ import (
 
 const MaxJSONBytes = 256 << 10
 
+// Full discovery includes every authorized schema and resource enum. Its
+// separate bound does not increase request, business-result or error budgets.
+const MaxDiscoveryJSONBytes = 1 << 20
+
 type Invocation struct {
 	Capability string          `json:"capability"`
 	AccountRef string          `json:"account_ref,omitempty"`

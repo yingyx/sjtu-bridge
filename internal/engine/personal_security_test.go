@@ -39,7 +39,7 @@ func personalSecurityFixture(t *testing.T) (*Personal, *testkit.Canvas, string, 
 	if err := store.Update(nil, func(state *storage.State) error {
 		state.Apps[app.ID] = app
 		state.Credentials[credential.ID] = credential
-		state.Grants[app.ID] = grant
+		state.Grants[grant.ID] = grant
 		return nil
 	}); err != nil {
 		t.Fatal(err)

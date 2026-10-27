@@ -27,6 +27,11 @@ type harness struct {
 	fake                 *testkit.Canvas
 }
 
+func (h *harness) grantID(app, capability string) string {
+	g, _ := h.b.Store.Snapshot().GrantFor(app, capability)
+	return g.ID
+}
+
 func setup(t *testing.T) *harness {
 	t.Helper()
 	dir := t.TempDir()
@@ -132,7 +137,7 @@ func TestTwoAppMatrixAndPersistence(t *testing.T) {
 	if e != nil || bytes.Contains(second, []byte(`"title"`)) {
 		t.Fatal(e)
 	}
-	if _, e = h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"}); e != nil {
+	if _, e = h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", GrantID: h.grantID("a", contracts.AssignmentsCapability)}); e != nil {
 		t.Fatal(e)
 	}
 	_, e = invoke(h.b, h.a, query("summary_v1", "1"))
@@ -235,7 +240,11 @@ func TestRevocationBarriers(t *testing.T) {
 				}
 				done := make(chan error, 1)
 				go func() {
-					_, e := h.b.Manage(context.Background(), AdminRequest{Action: action, ClientID: "a", CredentialID: h.cred})
+					q := AdminRequest{Action: action, ClientID: "a", CredentialID: h.cred}
+					if action == "grant_revoke" {
+						q.GrantID = h.grantID("a", contracts.AssignmentsCapability)
+					}
+					_, e := h.b.Manage(context.Background(), q)
 					done <- e
 				}()
 				select {
@@ -316,9 +325,9 @@ func TestProviderEscapesAndExpiredObjects(t *testing.T) {
 					a.Expires = past
 					s.Apps["a"] = a
 				case "grant":
-					g := s.Grants["a"]
+					g, _ := s.GrantFor("a", contracts.AssignmentsCapability)
 					g.Expires = past
-					s.Grants["a"] = g
+					s.Grants[g.ID] = g
 				case "credential":
 					c := s.Credentials[h.cred]
 					c.Expires = &past
@@ -416,7 +425,7 @@ func TestRevokeDoesNotWaitForOwnerNetworkOrResurrectGrant(t *testing.T) {
 	<-entered
 	revoked := make(chan error, 1)
 	go func() {
-		_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"})
+		_, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", GrantID: h.grantID("a", contracts.AssignmentsCapability)})
 		revoked <- e
 	}()
 	select {
@@ -471,7 +480,7 @@ func TestUnifiedDiscoveryAndPublicInvocation(t *testing.T) {
 	checkDiscovery(h.a, publicCount+1)
 	checkDiscovery(h.bToken, publicCount+1)
 	checkPublic(h.a)
-	if _, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", ClientID: "a"}); e != nil {
+	if _, e := h.b.Manage(context.Background(), AdminRequest{Action: "grant_revoke", GrantID: h.grantID("a", contracts.AssignmentsCapability)}); e != nil {
 		t.Fatal(e)
 	}
 	checkDiscovery(h.a, publicCount)
@@ -537,7 +546,11 @@ func TestPublicRevocationDoesNotHoldNetworkFence(t *testing.T) {
 			}
 			revoked := make(chan error, 1)
 			go func() {
-				_, e := h.b.Manage(context.Background(), AdminRequest{Action: action, ClientID: "a"})
+				q := AdminRequest{Action: action, ClientID: "a"}
+				if action == "grant_revoke" {
+					q.GrantID = h.grantID("a", contracts.AssignmentsCapability)
+				}
+				_, e := h.b.Manage(context.Background(), q)
 				revoked <- e
 			}()
 			select {

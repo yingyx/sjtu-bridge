@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const Format = 1
+const Format = 2
 const Service = "sjtu-bridge-v1"
 
 type Keyring interface {
@@ -136,8 +137,11 @@ func Open(dir string, k Keyring) (*Store, error) {
 		return nil, fail("Cannot read state")
 	}
 	var s State
-	if json.Unmarshal(b, &s) != nil || s.Version != Format || s.Apps == nil || s.Credentials == nil || s.Grants == nil {
-		return nil, fail("Unsupported or damaged state")
+	if json.Unmarshal(b, &s) != nil || s.Apps == nil || s.Credentials == nil || s.Grants == nil {
+		return nil, fail("Damaged state")
+	}
+	if s.Version != Format {
+		return nil, fail("Unsupported state format; version 1 requires an explicit offline broker upgrade")
 	}
 	encoded, e := k.Get(Service, keyName("vault"))
 	if e != nil {
@@ -145,34 +149,54 @@ func Open(dir string, k Keyring) (*Store, error) {
 	}
 	key, e := hex.DecodeString(encoded)
 	if e != nil || len(key) != 32 {
+		clear(key)
 		return nil, fail("Invalid vault key")
 	}
 	st := &Store{state: s, dir: dir, key: key, fences: map[string]*sync.RWMutex{}, denied: map[string]bool{}}
+	if e := st.validate(); e != nil {
+		st.Close()
+		return nil, e
+	}
+	return st, nil
+}
+
+func (st *Store) validate() error {
+	return st.validateWith(st.decrypt)
+}
+
+func (st *Store) validateWith(decrypt func(Credential) ([]byte, error)) error {
+	s := st.state
 	for id, a := range s.Apps {
 		if a.ID != id || len(a.TokenHash) != 64 || a.Generation == 0 {
-			return nil, fail("Invalid app state")
+			return fail("Invalid app state")
 		}
 		st.fences["app:"+id] = &sync.RWMutex{}
 	}
 	for id, c := range s.Credentials {
 		if c.ID != id || !validCredential(c) || c.Generation == 0 || c.AccountRef == "" {
-			return nil, fail("Invalid credential state")
+			return fail("Invalid credential state")
 		}
 		st.fences["credential:"+id] = &sync.RWMutex{}
 		if c.Active {
-			secret, e := st.decrypt(c)
+			secret, e := decrypt(c)
 			clear(secret)
 			if e != nil {
-				return nil, e
+				return e
 			}
 		}
 	}
+	seenGrants := map[string]bool{}
+	grantCounts := map[string]int{}
 	for id, g := range s.Grants {
-		if g.ID == "" || id != g.ClientID || !validGrant(g) || g.Version != "1" || g.Generation == 0 || g.Limit < 1 || g.Limit > 100 {
-			return nil, fail("Invalid grant state")
+		key := g.ClientID + "\x00" + g.Capability
+		grantCounts[g.ClientID]++
+		if g.ID == "" || id != g.ID || s.Apps[g.ClientID].ID == "" || seenGrants[key] || len(s.Grants) > MaxGrants || grantCounts[g.ClientID] > MaxAppGrants || !validGrant(g) || g.Version != "1" || g.Generation == 0 || g.Limit < 1 || g.Limit > 100 {
+			return fail("Invalid grant state")
 		}
+		seenGrants[key] = true
+		st.fences["grant:"+id] = &sync.RWMutex{}
 	}
-	return st, nil
+	return nil
 }
 func readBounded(p string, max int64) ([]byte, error) {
 	f, e := os.Open(p)
@@ -207,6 +231,9 @@ func (s *Store) Update(affected []string, mutate func(*State) error) error {
 	}
 	n.Revision++
 	b, e := json.Marshal(n)
+	if e == nil && len(b) > 4<<20 {
+		e = errors.New("state exceeds storage capacity")
+	}
 	if e == nil && s.BeforeCommit != nil {
 		e = s.BeforeCommit()
 	}
@@ -234,6 +261,11 @@ func (s *Store) Update(affected []string, mutate func(*State) error) error {
 			s.fences["credential:"+id] = &sync.RWMutex{}
 		}
 	}
+	for id := range n.Grants {
+		if s.fences["grant:"+id] == nil {
+			s.fences["grant:"+id] = &sync.RWMutex{}
+		}
+	}
 	return nil
 }
 
@@ -250,10 +282,10 @@ func (s *Store) Fence(kind, id string) func() {
 }
 
 type Lease struct {
-	App                 App
-	Grant               Grant
-	Credential          Credential
-	appFence, credFence *sync.RWMutex
+	App                             App
+	Grant                           Grant
+	Credential                      Credential
+	appFence, credFence, grantFence *sync.RWMutex
 }
 
 func (s *Store) Resolve(token string, q contracts.AssignmentQuery) (Lease, error) {
@@ -270,13 +302,13 @@ func (s *Store) resolve(token string, q contracts.ReadScope) (Lease, error) {
 	if e != nil {
 		return Lease{}, e
 	}
-	g := s.state.Grants[a.ID]
+	g, unique := s.state.GrantFor(a.ID, q.Capability)
 	c := s.state.Credentials[g.CredentialID]
 	denied := func() (Lease, error) {
 		return Lease{}, contracts.Fail("PERMISSION_DENIED", "Capability, account, resource or view is not authorized")
 	}
 	metadata, known := contracts.PersonalMetadata(g.Capability)
-	if !g.Active || !known || !validGrant(g) || !validCredential(c) || c.Provider != metadata.Provider || g.Capability != q.Capability || g.Version != "1" || !now.Before(g.Expires) || !c.Active || s.denied["credential:"+c.ID] || s.denied["grant:"+a.ID] || c.AccountRef != g.AccountRef || (c.Expires != nil && !now.Before(*c.Expires)) {
+	if !unique || !g.Active || !known || !validGrant(g) || !validCredential(c) || c.Provider != metadata.Provider || g.Capability != q.Capability || g.Version != "1" || !now.Before(g.Expires) || !c.Active || s.denied["credential:"+c.ID] || s.denied["grant:"+g.ID] || c.AccountRef != g.AccountRef || (c.Expires != nil && !now.Before(*c.Expires)) {
 		return denied()
 	}
 	if q.AccountRef != g.AccountRef || q.View != g.View || q.Limit < 1 || q.Limit > g.Limit {
@@ -293,7 +325,7 @@ func (s *Store) resolve(token string, q contracts.ReadScope) (Lease, error) {
 	}
 	g.Courses = append([]string(nil), g.Courses...)
 	g.Resources = append([]string(nil), g.Resources...)
-	return Lease{a, g, c, s.fences["app:"+a.ID], s.fences["credential:"+c.ID]}, nil
+	return Lease{a, g, c, s.fences["app:"+a.ID], s.fences["credential:"+c.ID], s.fences["grant:"+g.ID]}, nil
 }
 func (s *Store) authenticate(token string) (App, error) {
 	if len(token) == 64 {
@@ -309,31 +341,53 @@ func (s *Store) authenticate(token string) (App, error) {
 
 // Discovery takes the same object snapshot and fences as invocation. No grant
 // still permits an authenticated empty discovery, never private metadata.
-func (s *Store) Discover(token string, send func(*Lease) error) error {
+func (s *Store) Discover(token string, send func([]Lease) error) error {
 	s.mu.RLock()
 	a, e := s.authenticate(token)
 	if e != nil {
 		s.mu.RUnlock()
 		return e
 	}
-	g := s.state.Grants[a.ID]
-	f := s.fences["app:"+a.ID]
-	s.mu.RUnlock()
-	if resources := grantResources(g); len(resources) > 0 {
-		q := contracts.ReadScope{Capability: g.Capability, AccountRef: g.AccountRef, ResourceRef: resources[0], View: g.View, Limit: 1}
-		if l, e := s.ResolveRead(token, q); e == nil {
-			return s.PublishRead(token, q, l, func() error { return send(&l) })
+	grants := []Grant{}
+	credentialFences := map[string]*sync.RWMutex{}
+	grantFences := map[string]*sync.RWMutex{}
+	for _, g := range s.state.Grants {
+		if g.ClientID == a.ID {
+			grants = append(grants, g)
+			credentialFences[g.CredentialID] = s.fences["credential:"+g.CredentialID]
+			grantFences[g.ID] = s.fences["grant:"+g.ID]
 		}
 	}
-	f.RLock()
-	defer f.RUnlock()
-	s.mu.RLock()
-	_, e = s.authenticate(token)
+	appFence := s.fences["app:"+a.ID]
 	s.mu.RUnlock()
-	if e != nil {
+	// Match PublishRead's lock order. Sorted sets avoid duplicate RLocks when
+	// multiple grants share a credential, including when a writer is waiting.
+	unlockCredentials := lockReadFences(credentialFences)
+	defer unlockCredentials()
+	appFence.RLock()
+	defer appFence.RUnlock()
+	unlockGrants := lockReadFences(grantFences)
+	defer unlockGrants()
+	s.mu.RLock()
+	current, e := s.authenticate(token)
+	s.mu.RUnlock()
+	if e != nil || current.Generation != a.Generation {
+		if e == nil {
+			e = contracts.Fail("CLIENT_UNAUTHORIZED", "Application changed during discovery")
+		}
 		return e
 	}
-	return send(nil)
+	sort.Slice(grants, func(i, j int) bool { return grants[i].Capability < grants[j].Capability })
+	leases := []Lease{}
+	for _, g := range grants {
+		if resources := grantResources(g); len(resources) > 0 {
+			q := contracts.ReadScope{Capability: g.Capability, AccountRef: g.AccountRef, ResourceRef: resources[0], View: g.View, Limit: 1}
+			if l, err := s.ResolveRead(token, q); err == nil && l.Grant.ID == g.ID && l.Grant.Generation == g.Generation && l.Credential.ID == g.CredentialID {
+				leases = append(leases, l)
+			}
+		}
+	}
+	return send(leases)
 }
 func (s *Store) Publish(token string, q contracts.AssignmentQuery, l Lease, send func() error) error {
 	return s.PublishRead(token, contracts.ReadScope{Capability: contracts.AssignmentsCapability, AccountRef: q.AccountRef, ResourceRef: q.CourseRef, View: q.View, Limit: q.Limit}, l, send)
@@ -343,21 +397,26 @@ func (s *Store) PublishRead(token string, q contracts.ReadScope, l Lease, send f
 	defer l.credFence.RUnlock()
 	l.appFence.RLock()
 	defer l.appFence.RUnlock()
+	l.grantFence.RLock()
+	defer l.grantFence.RUnlock()
 	n, e := s.ResolveRead(token, q)
 	if e != nil {
 		return e
 	}
-	if n.App.Generation != l.App.Generation || n.Grant.Generation != l.Grant.Generation || n.Credential.ID != l.Credential.ID || n.Credential.Generation != l.Credential.Generation {
+	if n.App.Generation != l.App.Generation || n.Grant.ID != l.Grant.ID || n.Grant.Generation != l.Grant.Generation || n.Credential.ID != l.Credential.ID || n.Credential.Generation != l.Credential.Generation {
 		return contracts.Fail("PERMISSION_DENIED", "Authorization changed before publication")
 	}
 	// No global state lock is held across transport I/O.
 	return send()
 }
 func aad(c Credential) []byte {
+	return credentialAAD(c, Format)
+}
+func credentialAAD(c Credential, version int) []byte {
 	b, _ := json.Marshal(struct {
 		Version                     int
 		ID, Provider, Account, Kind string
-	}{Format, c.ID, c.Provider, c.AccountRef, c.Kind})
+	}{version, c.ID, c.Provider, c.AccountRef, c.Kind})
 	return b
 }
 func (s *Store) Encrypt(c Credential, secret []byte) error {
@@ -405,9 +464,7 @@ func (s *Store) decrypt(c Credential) ([]byte, error) {
 	return v, nil
 }
 func (s *Store) Secret(c Credential) ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.decrypt(c)
+	return s.CheckedCredentialSecret(c)
 }
 
 // Erase is best-effort cleanup after a durable credential tombstone.

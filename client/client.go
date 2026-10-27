@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -55,7 +56,7 @@ func connect(endpoint, token string) *Client {
 	return &Client{http: &http.Client{Transport: t, Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, token: token}
 }
 func (c *Client) Close() { c.http.CloseIdleConnections(); c.mu.Lock(); c.token = ""; c.mu.Unlock() }
-func (c *Client) call(ctx context.Context, path string, input, output any) error {
+func (c *Client) request(ctx context.Context, path string, input any) (*http.Response, error) {
 	method := "GET"
 	var body []byte
 	if input != nil {
@@ -63,12 +64,12 @@ func (c *Client) call(ctx context.Context, path string, input, output any) error
 		var e error
 		body, e = json.Marshal(input)
 		if e != nil || len(body) > contracts.MaxJSONBytes {
-			return contracts.Fail("INVALID_ARGUMENT", "Request exceeds 256 KiB")
+			return nil, contracts.Fail("INVALID_ARGUMENT", "Request exceeds 256 KiB")
 		}
 	}
 	r, e := http.NewRequestWithContext(ctx, method, "http://bridge.local"+path, bytes.NewReader(body))
 	if e != nil {
-		return contracts.Fail("INVALID_ARGUMENT", "Invalid request")
+		return nil, contracts.Fail("INVALID_ARGUMENT", "Invalid request")
 	}
 	c.mu.RLock()
 	token := c.token
@@ -77,24 +78,61 @@ func (c *Client) call(ctx context.Context, path string, input, output any) error
 	r.Header.Set("Content-Type", "application/json")
 	res, e := c.http.Do(r)
 	if e != nil {
-		if ctx.Err() != nil {
-			return contracts.Fail("CANCELED", "Request canceled")
-		}
-		return contracts.Fail("BROKER_UNAVAILABLE", "Local Broker unavailable; run sjtu broker run")
+		return nil, transportError(ctx, e)
+	}
+	return res, nil
+}
+
+func transportError(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return contracts.Fail("TIMEOUT", "Local request deadline exceeded")
+	}
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+		return contracts.Fail("CANCELED", "Request canceled")
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return contracts.Fail("TIMEOUT", "Local request timed out")
+	}
+	return contracts.Fail("BROKER_UNAVAILABLE", "Local Broker unavailable; run sjtu broker run")
+}
+
+func responseError(raw []byte) error {
+	var v struct {
+		Error *contracts.Error `json:"error"`
+	}
+	if json.Unmarshal(raw, &v) != nil || v.Error == nil || v.Error.Code == "" {
+		return contracts.Fail("BROKER_UNAVAILABLE", "Invalid Broker error")
+	}
+	return v.Error
+}
+
+func (c *Client) call(ctx context.Context, path string, input, output any) error {
+	res, e := c.request(ctx, path, input)
+	if e != nil {
+		return e
 	}
 	defer res.Body.Close()
-	b, e := io.ReadAll(io.LimitReader(res.Body, contracts.MaxJSONBytes+1))
-	if e != nil || len(b) > contracts.MaxJSONBytes {
-		return contracts.Fail("RESPONSE_TOO_LARGE", "Invalid or oversized Broker response")
+	limit := contracts.MaxJSONBytes
+	if path == "/v1/capabilities" && input == nil && res.StatusCode == http.StatusOK {
+		limit = contracts.MaxDiscoveryJSONBytes
+	}
+	b, e := io.ReadAll(io.LimitReader(res.Body, int64(limit)+1))
+	if e != nil {
+		if ctx.Err() != nil {
+			return transportError(ctx, e)
+		}
+		var timeout net.Error
+		if errors.As(e, &timeout) && timeout.Timeout() {
+			return transportError(ctx, e)
+		}
+		return contracts.Fail("RESPONSE_INCOMPLETE", "Broker response was interrupted")
+	}
+	if len(b) > limit {
+		return contracts.Fail("RESPONSE_TOO_LARGE", "Oversized Broker response")
 	}
 	if res.StatusCode != http.StatusOK {
-		var v struct {
-			Error *contracts.Error `json:"error"`
-		}
-		if json.Unmarshal(b, &v) != nil || v.Error == nil {
-			return contracts.Fail("BROKER_UNAVAILABLE", "Invalid Broker error")
-		}
-		return v.Error
+		return responseError(b)
 	}
 	if json.Unmarshal(b, output) != nil {
 		return contracts.Fail("BROKER_UNAVAILABLE", "Invalid Broker response")
@@ -115,7 +153,7 @@ func (c *Client) Services(ctx context.Context, filter contracts.ServiceFilter) (
 		return contracts.ServicePage{}, err
 	}
 	if ctx.Err() != nil {
-		return contracts.ServicePage{}, contracts.Fail("CANCELED", "Request canceled")
+		return contracts.ServicePage{}, transportError(ctx, ctx.Err())
 	}
 	return servicecatalog.Search(caps, filter)
 }
@@ -126,7 +164,7 @@ func (c *Client) DescribeService(ctx context.Context, id string) (contracts.Serv
 		return contracts.ServiceEntry{}, err
 	}
 	if ctx.Err() != nil {
-		return contracts.ServiceEntry{}, contracts.Fail("CANCELED", "Request canceled")
+		return contracts.ServiceEntry{}, transportError(ctx, ctx.Err())
 	}
 	return servicecatalog.Describe(caps, id)
 }
