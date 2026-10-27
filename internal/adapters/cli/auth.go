@@ -179,6 +179,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	authCmd.AddCommand(resources)
 	root.AddCommand(authCmd)
 	apps := &cobra.Command{Use: "apps", GroupID: "management", Short: "配置应用权限，管理应用连接"}
+	apps.AddCommand(appsSetupCommand(out, diag, input, jsonOutput, verbose))
 	for _, action := range []string{"create", "rotate"} {
 		q := &broker.AdminRequest{}
 		description := "创建应用并交付连接文件"
@@ -229,6 +230,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	apps.AddCommand(revokeApp)
 	root.AddCommand(apps)
 	permissions := &cobra.Command{Use: "permissions", GroupID: "management", Short: "授予或撤销应用的课程与字段视图权限"}
+	permissions.AddCommand(permissionsListCommand(out, diag, input, jsonOutput, verbose))
 	g := &broker.AdminRequest{}
 	grant := ownerCommand("grant", "grant", g, true)
 	grant.Flags().StringVar(&g.ClientID, "app", "", "Application ID")
@@ -246,7 +248,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	permissions.AddCommand(grant)
 	r := &broker.AdminRequest{}
 	revokeGrant := ownerCommand("revoke", "grant_revoke", r, true)
-	revokeGrant.Flags().StringVar(&r.GrantID, "grant", "", "Exact grant ID from auth status")
+	revokeGrant.Flags().StringVar(&r.GrantID, "grant", "", "Exact grant ID from permissions list")
 	revokeGrant.Flags().StringVar(&r.ClientID, "app", "", "Optional application ID to verify grant ownership")
 	_ = revokeGrant.MarkFlagRequired("grant")
 	permissions.AddCommand(revokeGrant)
