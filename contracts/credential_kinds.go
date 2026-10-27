@@ -10,7 +10,7 @@ func CredentialKind(provider string) (string, bool) {
 		return "JCourseAPIKey", true
 	case "shuiyuan":
 		return "DiscourseUserAPIKey", true
-	case "teaching", "sjtumail", "activity", "dekt", "electric", "bath", "pan":
+	case "teaching", "sjtumail", "activity", "dekt", "electric", "bath", "pan", "mlearning", "campuscard", "calendar", "myportal", "meeting", "transcribe":
 		return "JAAuthCookie", true
 	default:
 		return "", false

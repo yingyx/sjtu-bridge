@@ -60,7 +60,7 @@ func capabilityTool(capability contracts.Capability) *sdk.Tool {
 		description = append(description, "服务："+capability.Service)
 	}
 	description = append(description, "任务组："+capability.TaskGroupLabel+" ("+capability.TaskGroup+")", "Bridge 操作："+string(capability.Operation)+"；交付："+string(capability.Delivery))
-	description = append(description, fmt.Sprintf("数据分类：%s；影响：%v；可恢复性：%s；执行规则：%s", capability.DataClass, capability.Effects, capability.Reversibility, capability.ExecutionRule), "首版仅开放审核过的业务只读能力；annotations 仅为提示，不授予权限。写入和可信审批执行流程尚未实现。")
+	description = append(description, fmt.Sprintf("数据分类：%s；影响：%v；可恢复性：%s；执行规则：%s", capability.DataClass, capability.Effects, capability.Reversibility, capability.ExecutionRule), "仅开放受信定义明确准入的查询和受限写入；annotations 仅为提示，不授予权限。可信审批尚未实现，confirm_each、manual_only和disabled不能执行。")
 	if capability.Delivery == contracts.NavigationDelivery {
 		description = append(description, "此工具定位官方目的地；不是数据查询。静态相关能力仅表示公开产品支持关联，不代表当前授权；任务归属、入口依据和未接入原因见 navigation；当前可调用动作见 services_search/services_describe；本次不探测链接，不复制操作教程。navigation.upstream 仅描述需要用户在官网自行处理的动作，不是可调用工具或审批入口。")
 	}

@@ -77,7 +77,7 @@ func TestServiceDescribeExposesExternalGuidanceSeparatelyFromCapabilities(t *tes
 			for _, c := range entry.AvailableCapabilities {
 				available = append(available, c.ID)
 			}
-			if !slices.Equal(available, test.capability) || !slices.Equal(entry.SupportedCapabilityIDs, test.capability) {
+			if !slices.Equal(available, test.capability) || !slices.Equal(entry.SupportedCapabilityIDs, expected.SupportedCapabilityIDs) {
 				t.Fatalf("external tools changed supported/available capabilities: %s", raw)
 			}
 			for _, tool := range entry.ExternalClients {

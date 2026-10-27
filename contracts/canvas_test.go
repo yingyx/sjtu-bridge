@@ -22,6 +22,10 @@ func TestCanvasReadContractsRemainCourseScoped(t *testing.T) {
 			if r.Item {
 				q.ItemID = "9"
 			}
+			if id == CanvasRecordingContent {
+				q.MediaKind = "video"
+				q.Index = 1
+			}
 			if r.Module {
 				q.ModuleID = "5"
 			}
@@ -61,6 +65,22 @@ func TestCanvasReadContractsRemainCourseScoped(t *testing.T) {
 	for _, u := range []string{"https://oc.sjtu.edu.cn/courses/2/files/9", "https://oc.sjtu.edu.cn/courses/1/files/9/download", "https://oc.sjtu.edu.cn/courses/1/files/9?verifier=SYNTHETIC", "https://oc.sjtu.edu.cn/courses/1/external_tools/9", "https://oc.sjtu.edu.cn/courses/11/files/9", "https://evil.example/courses/1/pages/9"} {
 		if ValidCanvasNavigation(u, "canvas:course:1") {
 			t.Fatal("unsafe navigation", u)
+		}
+	}
+}
+
+func TestCanvasRecordingIndexDoesNotAuthorizeMaterialBody(t *testing.T) {
+	for _, id := range []string{"canvas.recordings.list", "canvas.recordings.transcript", "canvas.recordings.slides"} {
+		rule, ok := CanvasRules(id)
+		if !ok {
+			t.Fatal(id)
+		}
+		body := false
+		for _, f := range rule.Fields() {
+			body = body || f == "body"
+		}
+		if body != (id != "canvas.recordings.list") {
+			t.Fatal("material view crossed", id)
 		}
 	}
 }

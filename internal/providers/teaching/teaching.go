@@ -31,7 +31,7 @@ type Service struct {
 }
 
 func Allowed(u *url.URL) bool {
-	return campussession.LoginAllowed(u, Host) || (transport.ExactHTTPS(u, Host) && u.String() == endpoint)
+	return campussession.LoginAllowed(u, Host) || (transport.ExactHTTPS(u, Host) && u.String() == endpoint) || recordsAllowed(u)
 }
 func New() (*Service, func()) {
 	p := transport.NewSecure(Host, Allowed)
@@ -75,6 +75,10 @@ func (s *Service) fetch(ctx context.Context, secret []byte, resource string) ([]
 	if e != nil {
 		return nil, "", e
 	}
+	return s.fetchSession(ctx, session, resource, year, xqm)
+}
+
+func (s *Service) fetchSession(ctx context.Context, session *campussession.Session, resource, year, xqm string) ([]contracts.CampusRecord, string, error) {
 	form := url.Values{"xnm": {year}, "xqm": {xqm}, "kzlx": {"ck"}, "xsdm": {""}}
 	r, e := session.Post(ctx, endpoint, "application/x-www-form-urlencoded", []byte(form.Encode()))
 	if e != nil {
@@ -148,6 +152,9 @@ func parse(body []byte, resource, year, xqm string) ([]contracts.CampusRecord, s
 // Read refetches the same bounded term, verifies its identity, and binds offset
 // pagination to the returned snapshot. No personal response is cached.
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
+	if q.View == "grades_v1" || q.View == "exams_v1" || q.View == "grade_components_v1" {
+		return s.readRecords(ctx, secret, account, q, next)
+	}
 	rules, _ := contracts.CampusRules(contracts.TimetableCapability)
 	if q.AccountRef != account || !rules.ValidQuery(q) || len(next) > 128 {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Expected an own-account fixed-view timetable query")

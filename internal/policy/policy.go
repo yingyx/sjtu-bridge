@@ -11,6 +11,10 @@ func ExecutableRead(c contracts.Capability) bool {
 	}
 	switch c.DataClass {
 	case contracts.PersonalData:
+		if contracts.IsDigitalRead(c.ID) || contracts.IsStudentRecordCapability(c.ID) || contracts.IsCollaborationCapability(c.ID) {
+			known, ok := contracts.PersonalMetadata(c.ID)
+			return ok && c.Provider == known.Provider && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && len(c.Credentials) == 1 && c.Credentials[0] == known.Credentials[0]
+		}
 		provider := ""
 		switch c.ID {
 		case contracts.TimetableCapability:

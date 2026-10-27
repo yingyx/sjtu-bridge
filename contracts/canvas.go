@@ -9,15 +9,18 @@ import (
 // Canvas learning queries share course authority, not the portal-resource model.
 // Each reviewed capability has one fixed view and an independent grant.
 type CanvasQuery struct {
-	AccountRef string `json:"account_ref"`
-	CourseRef  string `json:"course_ref,omitempty"`
-	View       string `json:"view"`
-	Limit      int    `json:"limit"`
-	Cursor     string `json:"cursor,omitempty"`
-	ItemID     string `json:"item_id,omitempty"`
-	ModuleID   string `json:"module_id,omitempty"`
-	StartDate  string `json:"start_date,omitempty"`
-	EndDate    string `json:"end_date,omitempty"`
+	AccountRef   string `json:"account_ref"`
+	CourseRef    string `json:"course_ref,omitempty"`
+	View         string `json:"view"`
+	Limit        int    `json:"limit"`
+	Cursor       string `json:"cursor,omitempty"`
+	ItemID       string `json:"item_id,omitempty"`
+	ModuleID     string `json:"module_id,omitempty"`
+	StartDate    string `json:"start_date,omitempty"`
+	EndDate      string `json:"end_date,omitempty"`
+	AssignmentID string `json:"assignment_id,omitempty"`
+	MediaKind    string `json:"media_kind,omitempty"`
+	Index        int    `json:"index,omitempty"`
 }
 
 type CanvasLink struct {
@@ -27,36 +30,41 @@ type CanvasLink struct {
 
 // CanvasRecord is a bounded wire union. The Engine reconstructs each fixed view.
 type CanvasRecord struct {
-	CourseRef   string       `json:"course_ref"`
-	Ref         string       `json:"ref"`
-	Title       string       `json:"title"`
-	URL         string       `json:"url"`
-	Code        string       `json:"code,omitempty"`
-	Body        *string      `json:"body,omitempty"`
-	Truncated   *bool        `json:"truncated,omitempty"`
-	Links       []CanvasLink `json:"links,omitempty"`
-	DueAt       *string      `json:"due_at,omitempty"`
-	UnlockAt    *string      `json:"unlock_at,omitempty"`
-	LockAt      *string      `json:"lock_at,omitempty"`
-	UpdatedAt   *string      `json:"updated_at,omitempty"`
-	PostedAt    *string      `json:"posted_at,omitempty"`
-	StartAt     *string      `json:"start_at,omitempty"`
-	EndAt       *string      `json:"end_at,omitempty"`
-	Location    string       `json:"location,omitempty"`
-	State       string       `json:"state,omitempty"`
-	Kind        string       `json:"kind,omitempty"`
-	ParentRef   string       `json:"parent_ref,omitempty"`
-	ContentRef  string       `json:"content_ref,omitempty"`
-	Position    *int         `json:"position,omitempty"`
-	Count       *int         `json:"count,omitempty"`
-	Completed   *bool        `json:"completed,omitempty"`
-	Locked      *bool        `json:"locked,omitempty"`
-	Size        *int64       `json:"size,omitempty"`
-	ContentType string       `json:"content_type,omitempty"`
-	SubmittedAt *string      `json:"submitted_at,omitempty"`
-	Attempt     *int         `json:"attempt,omitempty"`
-	Late        *bool        `json:"late,omitempty"`
-	Missing     *bool        `json:"missing,omitempty"`
+	CourseRef      string                    `json:"course_ref"`
+	Ref            string                    `json:"ref"`
+	Title          string                    `json:"title"`
+	URL            string                    `json:"url"`
+	Code           string                    `json:"code,omitempty"`
+	Body           *string                   `json:"body,omitempty"`
+	Truncated      *bool                     `json:"truncated,omitempty"`
+	Links          []CanvasLink              `json:"links,omitempty"`
+	DueAt          *string                   `json:"due_at,omitempty"`
+	UnlockAt       *string                   `json:"unlock_at,omitempty"`
+	LockAt         *string                   `json:"lock_at,omitempty"`
+	UpdatedAt      *string                   `json:"updated_at,omitempty"`
+	PostedAt       *string                   `json:"posted_at,omitempty"`
+	StartAt        *string                   `json:"start_at,omitempty"`
+	EndAt          *string                   `json:"end_at,omitempty"`
+	Location       string                    `json:"location,omitempty"`
+	State          string                    `json:"state,omitempty"`
+	Kind           string                    `json:"kind,omitempty"`
+	ParentRef      string                    `json:"parent_ref,omitempty"`
+	ContentRef     string                    `json:"content_ref,omitempty"`
+	Position       *int                      `json:"position,omitempty"`
+	Count          *int                      `json:"count,omitempty"`
+	Completed      *bool                     `json:"completed,omitempty"`
+	Locked         *bool                     `json:"locked,omitempty"`
+	Size           *int64                    `json:"size,omitempty"`
+	ContentType    string                    `json:"content_type,omitempty"`
+	SubmittedAt    *string                   `json:"submitted_at,omitempty"`
+	Attempt        *int                      `json:"attempt,omitempty"`
+	Late           *bool                     `json:"late,omitempty"`
+	Missing        *bool                     `json:"missing,omitempty"`
+	Grade          *string                   `json:"grade,omitempty"`
+	Score          *float64                  `json:"score,omitempty"`
+	SubmissionType string                    `json:"submission_type,omitempty"`
+	Attachments    []CanvasAttachment        `json:"attachments,omitempty"`
+	Comments       []CanvasSubmissionComment `json:"comments,omitempty"`
 }
 
 type CanvasResponse struct {
@@ -74,10 +82,13 @@ type CanvasReadRules struct {
 }
 
 var canvasReadRules = []CanvasReadRules{
+	{ID: CanvasFileContent, View: "content_v1", Kind: "file_content", Item: true},
+	{ID: CanvasRecordingContent, View: "content_v1", Kind: "recording_content", Item: true},
 	{ID: "canvas.courses.list", View: "courses_v1", Kind: "course", List: true, Directory: true},
 	{ID: "canvas.courses.get", View: "overview_v1", Kind: "course", Body: true},
 	{ID: "canvas.assignments.get", View: "instructions_v1", Kind: "assignment", Body: true, Item: true},
 	{ID: "canvas.submissions.get", View: "status_v1", Kind: "submission", Item: true},
+	{ID: "canvas.submissions.feedback", View: "feedback_v1", Kind: "submission", Item: true},
 	{ID: "canvas.announcements.list", View: "announcements_v1", Kind: "announcement", List: true},
 	{ID: "canvas.announcements.get", View: "content_v1", Kind: "announcement", Body: true, Item: true},
 	{ID: "canvas.modules.list", View: "modules_v1", Kind: "module", List: true},
@@ -93,6 +104,9 @@ var canvasReadRules = []CanvasReadRules{
 	{ID: "canvas.todo.list", View: "todo_v1", Kind: "todo", List: true},
 	{ID: "canvas.discussions.list", View: "topics_v1", Kind: "discussion", List: true},
 	{ID: "canvas.discussions.get", View: "topic_v1", Kind: "discussion", Body: true, Item: true},
+	{ID: "canvas.recordings.list", View: "recordings_v1", Kind: "recording", List: true},
+	{ID: "canvas.recordings.transcript", View: "transcript_v1", Kind: "recording", Item: true},
+	{ID: "canvas.recordings.slides", View: "slides_v1", Kind: "recording", Item: true},
 }
 
 func CanvasRules(id string) (CanvasReadRules, bool) {
@@ -128,6 +142,15 @@ func (r CanvasReadRules) ValidGrant(view string, limit int, courses []string) bo
 	return true
 }
 func (r CanvasReadRules) ValidQuery(q CanvasQuery) bool {
+	if r.ID == CanvasFileContent {
+		return q.Cursor == "" && q.ModuleID == "" && q.StartDate == "" && q.EndDate == "" && q.MediaKind == "" && q.Index == 0 && (CanvasContentQuery{AccountRef: q.AccountRef, CourseRef: q.CourseRef, View: q.View, Limit: q.Limit, ItemID: q.ItemID, AssignmentID: q.AssignmentID}).Valid()
+	}
+	if r.ID == CanvasRecordingContent {
+		return q.Cursor == "" && q.ModuleID == "" && q.StartDate == "" && q.EndDate == "" && q.AssignmentID == "" && (RecordingContentQuery{AccountRef: q.AccountRef, CourseRef: q.CourseRef, View: q.View, Limit: q.Limit, ItemID: q.ItemID, MediaKind: q.MediaKind, Index: q.Index}).Valid()
+	}
+	if q.AssignmentID != "" || q.MediaKind != "" || q.Index != 0 {
+		return false
+	}
 	if q.AccountRef == "" || len(q.AccountRef) > 128 || q.View != r.View || q.Limit < 1 || q.Limit > 100 || len(q.Cursor) > 64 || (!r.List && q.Cursor != "") {
 		return false
 	}
@@ -157,6 +180,15 @@ func (r CanvasReadRules) ValidQuery(q CanvasQuery) bool {
 }
 
 func canvasInputDefinition(id string) map[string]any {
+	if id == CanvasFileContent || id == CanvasRecordingContent {
+		raw := CanvasContentInputSchema()
+		if id == CanvasRecordingContent {
+			raw = RecordingContentInputSchema()
+		}
+		var definition map[string]any
+		_ = json.Unmarshal(raw, &definition)
+		return definition
+	}
 	r, ok := CanvasRules(id)
 	if !ok {
 		return nil
@@ -218,6 +250,11 @@ func (r CanvasReadRules) Fields() []string {
 		f = append(f, "parent_ref", "size", "content_type", "updated_at", "locked")
 	case "folder":
 		f = append(f, "parent_ref", "count", "position", "locked")
+	case "recording":
+		f = append(f, "state", "start_at", "end_at", "location")
+		if r.ID == "canvas.recordings.transcript" || r.ID == "canvas.recordings.slides" {
+			f = append(f, "body", "truncated", "count")
+		}
 	case "submission":
 		f = append(f, "state", "submitted_at", "attempt", "late", "missing")
 	case "event":
@@ -225,9 +262,18 @@ func (r CanvasReadRules) Fields() []string {
 	case "todo":
 		f = append(f, "due_at", "kind")
 	}
+	if r.ID == "canvas.submissions.feedback" {
+		f = append(f, "body", "truncated", "links", "grade", "score", "submission_type", "attachments", "comments")
+	}
 	return f
 }
 func CanvasCapability(id, account string, courses []string, view string, limit int) (Capability, bool) {
+	if id == CanvasFileContent {
+		return CanvasContentCapability(account, courses, view, limit)
+	}
+	if id == CanvasRecordingContent {
+		return RecordingContentCapability(account, courses, view, limit)
+	}
 	r, ok := CanvasRules(id)
 	if !ok || !r.ValidGrant(view, limit, courses) {
 		return Capability{}, false
@@ -256,6 +302,12 @@ func CanvasCapability(id, account string, courses []string, view string, limit i
 			schema = map[string]any{"type": "boolean"}
 		case "position", "count", "size", "attempt":
 			schema = map[string]any{"type": "integer", "minimum": 0}
+		case "score":
+			schema = map[string]any{"type": "number"}
+		case "attachments":
+			schema = canvasAttachmentSchema()
+		case "comments":
+			schema = canvasCommentSchema()
 		case "links":
 			schema = map[string]any{"type": "array", "maxItems": 40, "items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"title": str, "url": str}, "required": []string{"title", "url"}}}
 		}

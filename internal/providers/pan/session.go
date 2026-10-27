@@ -1,5 +1,6 @@
 // Package pan authenticates an actively imported JAAuthCookie through the
-// first-party Pan SSO exchange, then reads only the user's personal-space quota.
+// first-party Pan SSO exchange. Quota, file reads and non-overwriting creations
+// remain independently authorized capabilities.
 package pan
 
 import (
@@ -54,8 +55,15 @@ var tokenPattern = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{32,512}$`)
 var userIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 
 // Allowed admits only discovery, the authentication exchange and two exact
-// quota prerequisites. It never admits personal initialization or file APIs.
+// quota prerequisites. Additional reviewed file endpoints are explicit;
+// unopened personal spaces are never initialized by a read.
 func Allowed(u *url.URL) bool {
+	if writeAllowed(u) {
+		return true
+	}
+	if fileAllowed(u) {
+		return true
+	}
 	if !transport.ExactHTTPS(u, Host) {
 		return false
 	}
@@ -68,7 +76,7 @@ func Allowed(u *url.URL) bool {
 		return len(q) == 3 && q.Get("auto_redirect") == "false" && q.Get("from") == "web" && noncePattern.MatchString(q.Get("custom_state"))
 	case exchangePath:
 		return len(q) == 3 && q.Get("type") == "sso" && opaque.MatchString(q.Get("credential")) && devicePattern.MatchString(q.Get("device_id"))
-	case "/user/v1/organization", "/user/v1/space/1":
+	case "/user/v1/organization", "/user/v1/space/1", "/user/v1/space/1/personal":
 		return len(q) == 1 && tokenPattern.MatchString(q.Get("user_token"))
 	}
 	return false

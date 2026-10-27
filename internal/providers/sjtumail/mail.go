@@ -1,5 +1,6 @@
-// Package sjtumail reads only inbox message headers using the first-party
-// Zimbra SOAP session. It has no body-fetch, flag-update, or send operation.
+// Package sjtumail reads independently authorized fixed mailbox views and
+// attachment content through the first-party Zimbra session, without marking
+// messages read, changing flags or sending mail.
 package sjtumail
 
 import (
@@ -29,7 +30,7 @@ const landing = "https://mail.sjtu.edu.cn/zimbra/"
 type Service struct{ Session campussession.Service }
 
 func Allowed(u *url.URL) bool {
-	return campussession.LoginAllowed(u, Host) || (transport.ExactHTTPS(u, Host) && (u.String() == endpoint || u.String() == landing))
+	return attachmentURL(u) || campussession.LoginAllowed(u, Host) || (transport.ExactHTTPS(u, Host) && (u.String() == endpoint || u.String() == landing))
 }
 func New() (*Service, func()) {
 	p := transport.NewSecure(Host, Allowed)
@@ -101,18 +102,20 @@ func (s *Service) Identity(ctx context.Context, secret []byte) (string, error) {
 	return account, e
 }
 func soap(ctx context.Context, session *mailSession, operation, namespace string, params map[string]any) (json.RawMessage, error) {
-	if operation != "GetInfoRequest" && operation != "SearchRequest" {
+	if operation != "GetInfoRequest" && operation != "SearchRequest" && operation != "GetMsgRequest" && operation != "GetFolderRequest" {
 		return nil, contracts.Fail("PERMISSION_DENIED", "Mailbox operation denied")
 	}
 	params["_jsns"] = namespace
 	request := map[string]any{"Header": map[string]any{"context": map[string]any{"_jsns": "urn:zimbra", "format": map[string]string{"type": "js"}, "authToken": map[string]string{"_content": session.portal.Cookie("ZM_AUTH_TOKEN")}, "csrfToken": session.csrf}}, "Body": map[string]any{operation: params}}
 	body, _ := json.Marshal(request)
+	defer clear(body)
 	u, _ := url.Parse(endpoint)
 	h := session.portal.Header(u)
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
 	h.Set("X-Zimbra-Csrf-Token", session.csrf)
 	r, e := session.http.Post(ctx, u, h, body)
+	defer clear(r.Body)
 	if e != nil {
 		return nil, e
 	}
@@ -143,6 +146,9 @@ func soap(ctx context.Context, session *mailSession, operation, namespace string
 	return result, nil
 }
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
+	if q.View == "folders_v1" || q.View == "messages_v1" || q.View == "message_v1" {
+		return s.readMessages(ctx, secret, account, q, next)
+	}
 	rules, _ := contracts.CampusRules(contracts.MailCapability)
 	if !rules.ValidQuery(q) || !utf8.ValidString(q.Query) || utf8.RuneCountInString(q.Query) > 128 || strings.ContainsAny(q.Query, "\x00\r\n") {
 		return domain.CampusPage{}, contracts.Fail("INVALID_ARGUMENT", "Invalid bounded inbox header query")

@@ -1,6 +1,7 @@
 // Package shuiyuan implements a category-scoped, GET-only Discourse search.
 // Authentication is one explicitly imported User API Key; browser cookies,
-// post reads, timings, clicks, notifications and all mutation endpoints are denied.
+// topic reads and notifications require separate grants; timings, clicks and all
+// mutation endpoints are denied.
 package shuiyuan
 
 import (
@@ -41,6 +42,9 @@ var searchExpression = regexp.MustCompile(`^(.+) category:=([1-9][0-9]{0,9})$`)
 func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) || u.ForceQuery {
 		return false
+	}
+	if readAllowed(u) {
+		return true
 	}
 	if u.Path == "/session/current.json" || u.Path == "/site.json" {
 		return u.RawQuery == ""

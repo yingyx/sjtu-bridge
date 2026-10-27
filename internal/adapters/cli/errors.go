@@ -144,6 +144,18 @@ func presentError(cmd *cobra.Command, err error) *cliError {
 			}
 		case "BROKER_UNAVAILABLE":
 			e.Hint = "在另一终端运行 sjtu broker run。"
+		case "WRITE_OUTCOME_UNKNOWN":
+			e.Hint = "上游可能已完成写入；先在官网核对指定路径，不能直接重试。"
+		case "CONFLICT":
+			e.Hint = "目标已存在；本能力禁止覆盖，请核对路径。"
+		case "CONTENT_UNAVAILABLE", "CONTENT_CHANGED":
+			e.Hint = "使用同一应用连接，向原业务能力重新取得内容引用。"
+		case "RESPONSE_INCOMPLETE":
+			e.Hint = "此次未取得完整结果；核对来源和连接后重新请求，不将部分数据当作完整结果。"
+		case "OUTPUT_UNAVAILABLE":
+			e.Hint = "检查输出父目录是否可写，并指定尚不存在的文件路径。"
+		case "OUTPUT_CLEANUP_FAILED":
+			e.Hint = "本次输出可能不完整；检查并手动移除指定输出文件后再重试。"
 		case "AUDIT_UNAVAILABLE":
 			if isManagementCommand(cmd) && !strings.Contains(strings.ToLower(typed.Message), "private result withheld") {
 				e.Hint = "管理操作可能已生效；先核对 sjtu auth status 和应用授权状态，再决定是否重试。"

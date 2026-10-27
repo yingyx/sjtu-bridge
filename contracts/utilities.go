@@ -23,6 +23,12 @@ func utilityDates(id string) bool {
 	return id == ElectricityHistoryCapability || id == BathUsageCapability
 }
 func validUtilityFilters(id string, q CampusQuery) bool {
+	if digitalField(id, "begin") {
+		return true
+	}
+	if collaborationField(id, "begin") {
+		return true
+	}
 	if utilityDates(id) {
 		days := 366
 		if id == BathUsageCapability {

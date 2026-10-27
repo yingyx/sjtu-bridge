@@ -164,6 +164,21 @@ func (p *Personal) invokeCampus(ctx context.Context, token string, inv contracts
 			if e != nil {
 				return e
 			}
+		} else if contracts.IsDigitalRead(inv.Capability) {
+			row, e = projectDigital(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
+		} else if contracts.IsStudentRecordCapability(inv.Capability) {
+			row, e = ProjectStudentRecord(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
+		} else if contracts.IsCollaborationCapability(inv.Capability) {
+			row, e = projectCollaborationRecord(inv.Capability, q, r)
+			if e != nil {
+				return e
+			}
 		} else {
 			row, e = projectUtility(inv.Capability, q, r)
 			if e != nil {

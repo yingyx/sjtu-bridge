@@ -133,7 +133,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	}
 	defer session.Close()
 	tools, e := session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+3 {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+4 {
 		t.Fatal("unexpected tools", e)
 	}
 	testConnectedServices(t, ctx, c, path, session, 1)
@@ -222,9 +222,13 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	if json.Unmarshal(raw, &fromMCP) != nil || !reflect.DeepEqual(expected.Data, fromMCP.Data) || bytes.Contains(raw, []byte(`"title"`)) {
 		t.Fatal("MCP projection differs")
 	}
+	contentRef := testConnectedContent(t, ctx, b, c, path, session, q)
 	// Retaining the MCP connection/tool name never retains revoked permission.
 	if _, e = b.Manage(ctx, broker.AdminRequest{Action: "grant_revoke", ClientID: "b", GrantID: granted.(storage.Grant).ID}); e != nil {
 		t.Fatal(e)
+	}
+	if _, e = c.DescribeContent(ctx, contentRef); e == nil {
+		t.Fatal("revoked content reference remains usable")
 	}
 	result, e = session.CallTool(ctx, &sdk.CallToolParams{Name: "learning_canvas_assignments_list", Arguments: q})
 	if e != nil || !result.IsError {
@@ -233,7 +237,7 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 	// Generic discovery must refresh even without an intervening tools/list.
 	testConnectedServices(t, ctx, c, path, session, 0)
 	tools, e = session.ListTools(ctx, nil)
-	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+2 {
+	if e != nil || len(tools.Tools) != len(contracts.PublicCapabilities())+3 {
 		t.Fatal("revoked tool discovery", e)
 	}
 	caps, e = c.Capabilities(ctx)

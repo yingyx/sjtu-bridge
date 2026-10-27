@@ -35,6 +35,7 @@ var catalog = []Capability{
 	canvasQuery("canvas.courses.get", "读取 Canvas 课程概览与大纲", []string{"课程大纲", "Canvas概览"}, "读取一门获准课程的名称、代码和 syllabus 文本；外部教参、学校定制课程大纲和录播不在此能力内。"),
 	canvasQuery("canvas.assignments.get", "读取 Canvas 作业说明", []string{"作业正文", "作业要求", "作业详情"}, "读取获准课程的一项作业说明及个性化截止、开放和关闭时间，不包含评分、答案或提交内容。"),
 	canvasQuery("canvas.submissions.get", "查询本人 Canvas 作业提交状态", []string{"是否交作业", "作业提交情况"}, "仅查询本人指定作业的提交状态、时间、次数及迟交和缺交标志；不返回成绩、评语、提交正文或附件，不进行提交。"),
+	canvasQuery("canvas.submissions.feedback", "读取本人 Canvas 作业反馈与提交内容", []string{"作业成绩", "作业评语", "本人提交正文", "提交附件"}, "固定读取获准课程指定作业的本人提交、成绩、评语及附件名称/ID；不请求会标记已读的read_status。附件字节须另授files.content，并用assignment_id核验本人附件归属。"),
 	canvasQuery("canvas.announcements.list", "查询 Canvas 课程公告", []string{"课程公告", "Canvas通知"}, "分页读取一门获准课程的公告索引与发布时间；正文须另行授权 announcements.get，不标记已读。"),
 	canvasQuery("canvas.announcements.get", "读取 Canvas 公告正文", []string{"公告正文", "课程通知正文"}, "读取一门获准课程指定公告的正文文本，不包含回复、人员信息或附件下载，不标记已读。"),
 	canvasQuery("canvas.modules.list", "查询 Canvas 学习模块", []string{"学习模块", "单元目录"}, "分页查询获准课程的模块、位置、条目数量与源站模块状态；条目须使用 modules.items，不把内嵌省略视为无内容。"),
@@ -43,6 +44,7 @@ var catalog = []Capability{
 	canvasQuery("canvas.pages.get", "读取 Canvas 课程页面正文", []string{"课程页面正文", "课程Wiki正文"}, "读取获准课程中一个数字 page_id 的页面正文文本，不执行 HTML、自动读取附件或调用进度修改接口。"),
 	canvasQuery("canvas.files.list", "查询 Canvas 课程文件元数据", []string{"课程文件", "课件目录"}, "分页列出获准课程的文件名称、大小、类型及目录引用，仅提供课程内官网入口；丢弃下载地址和 verifier，不下载文件。"),
 	canvasQuery("canvas.files.get", "查询 Canvas 文件元数据", []string{"课件信息", "文件详情"}, "通过课程限定端点核对单个文件的元数据；不使用全局文件端点或返回下载票据，不读取文件内容。"),
+	canvasQuery(CanvasFileContent, "获取 Canvas 文件内容引用", []string{"课件下载", "作业附件下载", "Canvas文件下载"}, "独立核验指定课程文件，或使用assignment_id证明文件属于本人该作业的提交附件，再签发短期内容引用供content下载。仅沿同文件的已核下载链读取，学校S3出口绑定完整签名URL且不转发Canvas凭据；不返回上游URL或verifier，不扩大文件元数据授权。"),
 	canvasQuery("canvas.folders.list", "查询 Canvas 课程文件夹", []string{"课程文件夹", "课件目录结构"}, "分页列出获准课程文件夹及父目录引用；与 files.list 的 parent_ref 配合组织课件，不访问个人文件空间。"),
 	canvasQuery("canvas.quizzes.list", "查询 Canvas 测验安排", []string{"测验安排", "Canvas测验"}, "分页查询获准课程传统 Quiz 的名称和个性化时间，不返回题目、答案、分数或创建考试尝试；New Quizzes 与外部考试工具不混同。"),
 	canvasQuery("canvas.quizzes.get", "读取 Canvas 测验说明", []string{"测验说明", "测验详情"}, "读取获准课程指定传统 Quiz 的说明及时间，不读取试题、答案或考试尝试，不参加考试。"),
@@ -50,6 +52,10 @@ var catalog = []Capability{
 	canvasQuery("canvas.todo.list", "查询 Canvas 课程待办", []string{"课程待办", "待交作业"}, "查询本人在一门获准课程中的源站待办，限学生 submitting 作业项；不是全部作业或全局计划表，不返回评分和提交内容，不忽略待办。"),
 	canvasQuery("canvas.discussions.list", "查询 Canvas 课程讨论主题", []string{"课程讨论", "讨论区主题"}, "分页查询获准课程的讨论主题索引，不含回复、参与者、评分或未读统计，不标记已读。"),
 	canvasQuery("canvas.discussions.get", "读取 Canvas 讨论主题", []string{"讨论主题正文"}, "读取指定获准课程的讨论主题初始文本，不含回复和参与者信息，不发帖、回复、订阅或标记已读。"),
+	canvasQuery("canvas.recordings.list", "查询获准课程的课堂录播讲次", []string{"录播讲次", "课程回放", "课堂录像目录"}, "以独立授权的课程通过官方sessionless LTI启动交换访问新录播平台，查询讲次及可用状态；不开放旧平台、直播或未选课程旁听，不记录播放进度。"),
+	canvasQuery("canvas.recordings.transcript", "读取课堂录播原始字幕", []string{"录播字幕", "课堂逐字稿", "原始转写"}, "先核验讲次在获准课程中，再读取已有原始字幕及毫秒时间；不发起ASR任务，不请求优化或翻译。文本有界并标记截断。"),
+	canvasQuery("canvas.recordings.slides", "读取课堂录播投影片文字", []string{"录播投影片文字", "课堂PPT文字", "投影片OCR"}, "读取获准讲次已有的投影片OCR全文或源关键词，保留页序及数量；不执行OCR、合成PDF或返回带票据图片URL，原图另授recordings.content。"),
+	canvasQuery(CanvasRecordingContent, "获取课堂录播视频或投影片原图内容引用", []string{"课堂录像下载", "录播视频下载", "投影片原图下载"}, "按获准课程、讲次、media_kind及index选择源视频机位或投影片原图，复用通用内容通道。仅固定v/sv媒体域及live原图/MP4域、可核验强版本及Range的直接文件；HLS/直播、未知存储域和转码不在该路径内，不向媒体域转发校园根凭据。"),
 	activityMetadata(ActivityTypesCapability, "查询校园活动分类", []string{"活动类型", "活动分类", "活动子分类"}, "读取本人可见的活动分类树，以稳定分类 ID 选择活动筛选条件；每页最多 100 条，不读取活动详情。"),
 	activityMetadata(ActivityCalendarCapability, "查询单日校园活动", []string{"活动日历", "当日活动", "某日活动"}, "指定支持日历的可见顶层分类及单日日期，读取本人可见的活动摘要，每页最多 20 条；不读取详情、名额或参与人数。"),
 	activityMetadata(ActivityCountsCapability, "查询每月活动日期计数", []string{"活动日期计数", "月活动日历"}, "读取指定月份每天的可见活动条数；不是报名人数或剩余名额。结果不分页，limit 须容纳完整返回。"),
@@ -369,18 +375,19 @@ func capabilitySearchScore(c Capability, terms []string) (int, bool) {
 // CapabilitySummary is the task-oriented discovery view. Execution policy and
 // full contracts remain available separately and are never inferred from it.
 type CapabilitySummary struct {
-	ID                    string   `json:"id"`
-	Title                 string   `json:"title"`
-	Description           string   `json:"description"`
-	CLICommand            string   `json:"cli_command"`
-	MCPTool               string   `json:"mcp_tool"`
-	Delivery              Delivery `json:"delivery"`
-	Category              string   `json:"category"`
-	Service               string   `json:"service"`
-	Credentials           []string `json:"credentials"`
-	AuthorizationRequired bool     `json:"authorization_required"`
-	GrantScope            []string `json:"grant_scope"`
-	Authorized            bool     `json:"authorized"`
+	ID                    string    `json:"id"`
+	Title                 string    `json:"title"`
+	Description           string    `json:"description"`
+	CLICommand            string    `json:"cli_command"`
+	MCPTool               string    `json:"mcp_tool"`
+	Operation             Operation `json:"operation"`
+	Delivery              Delivery  `json:"delivery"`
+	Category              string    `json:"category"`
+	Service               string    `json:"service"`
+	Credentials           []string  `json:"credentials"`
+	AuthorizationRequired bool      `json:"authorization_required"`
+	GrantScope            []string  `json:"grant_scope"`
+	Authorized            bool      `json:"authorized"`
 }
 
 // CapabilitySummaries returns only task selection and invocation information.
@@ -395,7 +402,7 @@ func CapabilitySummaries(caps []Capability) []CapabilitySummary {
 		}
 		result = append(result, CapabilitySummary{
 			ID: c.ID, Title: c.Title, Description: description,
-			CLICommand: c.CLICommand, MCPTool: c.MCPTool, Delivery: c.Delivery,
+			CLICommand: c.CLICommand, MCPTool: c.MCPTool, Delivery: c.Delivery, Operation: c.Operation,
 			Category: c.Category, Service: c.Service,
 			Credentials: c.Credentials, AuthorizationRequired: c.ExecutionRule == GrantExecution,
 			GrantScope: CapabilityGrantScope(c), Authorized: c.Authorized,
@@ -422,4 +429,11 @@ func utilityMetadata(id, title, provider string, aliases []string, description s
 		service = "宿舍洗浴"
 	}
 	return Capability{ID: id, ContractVersion: "1", Title: title, Category: "life", CategoryLabel: "校园生活与健康", TaskGroup: "utilities", TaskGroupLabel: "住宿与生活设施", Service: service, Aliases: aliases, Keywords: []string{provider, "utilities"}, Description: description, DataClass: PersonalData, ExecutionRule: GrantExecution, Effects: []Effect{NoEffect}, Reversibility: NotApplicable, Operation: Read, Delivery: QueryDelivery, Credentials: []string{"JAAuthCookie"}, Provider: provider}
+}
+
+// Keep production registration explicit and separate from provider research.
+func init() {
+	catalog = append(catalog, digitalMetadata()...)
+	catalog = append(catalog, StudentRecordMetadata()...)
+	catalog = append(catalog, CollaborationMetadata()...)
 }

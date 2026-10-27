@@ -243,7 +243,7 @@ func capabilityTasks() map[string][]string {
 		add("jcourse", contracts.JCoursePrefix+op)
 	}
 	add("teaching-timetable", contracts.TimetableCapability)
-	add("mail", contracts.MailCapability)
+	add("mail", contracts.MailCapability, contracts.MailFoldersCapability, contracts.MailSearchCapability, contracts.MailMessageCapability, contracts.MailAttachmentCapability)
 	add("campus-activities", contracts.ActivityCapability, contracts.ActivityTypesCapability, contracts.ActivityCalendarCapability, contracts.ActivityCountsCapability, contracts.ActivityRegistrationsCapability, contracts.ActivityCollectionsCapability, "development.activities.navigate")
 	add("second-class-records", contracts.SecondClassHonorsCapability, contracts.SecondClassPracticeCapability, contracts.SecondClassEducationCapability)
 	add("dorm-electricity", contracts.ElectricityBalanceCapability, contracts.ElectricityHistoryCapability)
@@ -271,8 +271,16 @@ func capabilityTasks() map[string][]string {
 	add("career-opportunities", contracts.CareerListCapability)
 	add("campus-news", contracts.CampusNewsCapability)
 	add("campus-ai", contracts.AIStatusCapability, contracts.AIUsageCapability)
-	add("cloud-storage", contracts.PanQuotaCapability)
-	add("shuiyuan-community", contracts.ShuiyuanSearchCapability)
+	add("cloud-storage", contracts.PanQuotaCapability, contracts.PanFilesCapability, contracts.PanInfoCapability, contracts.PanContentCapability)
+	add("shuiyuan-community", contracts.ShuiyuanSearchCapability, contracts.ShuiyuanTopicsCapability, contracts.ShuiyuanTopicCapability, contracts.ShuiyuanPostsCapability, contracts.ShuiyuanNotificationsCapability)
+	add("academic-results", contracts.GradesCapability, contracts.GradesComponentsCapability, contracts.ExamsCapability)
+	add("class-attendance", contracts.AttendanceRecordsCapability, contracts.AttendanceStatusCapability)
+	add("campus-card", contracts.CardBalanceCapability, contracts.CardTransactionsCapability)
+	add("personal-calendar", contracts.CalendarListCapability, contracts.CalendarEventsCapability)
+	add("portal-messages", contracts.MessageUnreadCapability, contracts.MessageGroupsCapability)
+	add("portal-tasks", contracts.PortalTasksCapability)
+	add("video-meetings", contracts.MeetingListCapability, contracts.MeetingDetailsCapability, contracts.MeetingCalendarCapability, contracts.MeetingBusyCapability)
+	add("campus-ai", contracts.TranscriptionListCapability, contracts.TranscriptionGetCapability)
 	return m
 }
 
@@ -377,6 +385,8 @@ func buildRecords() []record {
 	result = mergeReviewedRecords(result, externalExpansionRecords())
 	result = mergeReviewedRecords(result, collaborationExpansionRecords())
 	result = mergeReviewedRecords(result, aiExpansionRecords())
+	result = mergeReviewedRecords(result, personalExpansionRecords())
+	updatePersonalTasks(result)
 	// Coalesce exact locators, keeping distinct downstream action descriptions.
 	for i := range result {
 		r := &result[i]

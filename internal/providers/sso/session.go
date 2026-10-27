@@ -86,6 +86,10 @@ func Redirect(r transport.Reply, from *url.URL) (*url.URL, error) {
 	if err != nil {
 		return nil, contracts.Fail("UPSTREAM_CHANGED", "Invalid login redirect")
 	}
+	// Some first-party PHP clients emit literal spaces in OAuth scope values.
+	// Browsers percent-encode these; leaving them in RequestURI produces HTTP400.
+	// Preserve every other byte and retain the caller's exact destination checks.
+	ref.RawQuery = strings.ReplaceAll(ref.RawQuery, " ", "%20")
 	return from.ResolveReference(ref), nil
 }
 

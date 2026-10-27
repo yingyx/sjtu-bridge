@@ -139,13 +139,13 @@ func campusLoginCommand(out, diag io.Writer, input io.Reader, jsonOutput, verbos
 	label := "main"
 	sourceCredential := ""
 	c := &cobra.Command{Use: "login", Short: "通过 jAccount 扫码，分别核验并导入所选校园门户账号", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if len(providers) == 0 || len(providers) > 7 || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`).MatchString(label) {
+		if len(providers) == 0 || len(providers) > 13 || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`).MatchString(label) {
 			return contracts.Fail("INVALID_ARGUMENT", "Select supported campus portals and a valid local account label")
 		}
 		seen := map[string]bool{}
 		for _, p := range providers {
 			if !campusCredentialProvider(p) || seen[p] {
-				return contracts.Fail("INVALID_ARGUMENT", "Select teaching, sjtumail, activity, dekt, electric, bath or pan once each")
+				return contracts.Fail("INVALID_ARGUMENT", "Select teaching, sjtumail, activity, dekt, electric, bath, pan, mlearning, campuscard, calendar, myportal, meeting or transcribe once each")
 			}
 			seen[p] = true
 		}
@@ -219,7 +219,7 @@ func campusLoginCommand(out, diag io.Writer, input io.Reader, jsonOutput, verbos
 		}
 		return loginResultsError(results)
 	}}
-	c.Flags().StringSliceVar(&providers, "providers", providers, "待独立核验的门户：teaching,sjtumail,activity,dekt,electric,bath,pan；默认前两项")
+	c.Flags().StringSliceVar(&providers, "providers", providers, "待独立核验的门户：teaching,sjtumail,activity,dekt,electric,bath,pan,mlearning,campuscard,calendar,myportal,meeting,transcribe；默认前两项")
 	c.Flags().StringVar(&label, "account", "main", "本地账号标签；同标签重导入撤销旧凭据及其授权")
 	c.Flags().StringVar(&sourceCredential, "from-credential", "", "由 Broker 内部复用另一门户的已保存凭据 ID；仍需核验并确认目标账号")
 	return c
@@ -227,7 +227,7 @@ func campusLoginCommand(out, diag io.Writer, input io.Reader, jsonOutput, verbos
 
 func campusCredentialProvider(provider string) bool {
 	switch provider {
-	case "teaching", "sjtumail", "activity", "dekt", "electric", "bath", "pan":
+	case "teaching", "sjtumail", "activity", "dekt", "electric", "bath", "pan", "mlearning", "campuscard", "calendar", "myportal", "meeting", "transcribe":
 		return true
 	default:
 		return false

@@ -38,7 +38,7 @@ func Allowed(u *url.URL) bool {
 	if !transport.ExactHTTPS(u, Host) {
 		return false
 	}
-	if learningAllowed(u) {
+	if recordingCanvasAllowed(u) || contentAllowed(u) || learningAllowed(u) {
 		return true
 	}
 	if u.Path == "/api/v1/users/self/profile" {

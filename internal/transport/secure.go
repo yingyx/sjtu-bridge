@@ -83,7 +83,20 @@ func (c *SecureClient) Post(ctx context.Context, u *url.URL, header http.Header,
 	}
 	return c.request(ctx, http.MethodPost, u, header, body)
 }
+
+// GetBounded enforces the caller's smaller response allocation/read budget.
+// In particular a server ignoring Range must not cause a content provider to
+// read an entire object into memory before it can reject the response.
+func (c *SecureClient) GetBounded(ctx context.Context, u *url.URL, header http.Header, maxBytes int) (Reply, error) {
+	if maxBytes < 1 || maxBytes > MaxBody {
+		return Reply{}, contracts.Fail("INVALID_ARGUMENT", "Invalid upstream response byte limit")
+	}
+	return c.requestBounded(ctx, http.MethodGet, u, header, nil, maxBytes)
+}
 func (c *SecureClient) request(ctx context.Context, method string, u *url.URL, header http.Header, body []byte) (Reply, error) {
+	return c.requestBounded(ctx, method, u, header, body, MaxBody)
+}
+func (c *SecureClient) requestBounded(ctx context.Context, method string, u *url.URL, header http.Header, body []byte, maxBytes int) (Reply, error) {
 	if !c.allowed(u) {
 		return Reply{}, contracts.Fail("PERMISSION_DENIED", "Unreviewed authentication destination")
 	}
@@ -110,12 +123,17 @@ func (c *SecureClient) request(ctx context.Context, method string, u *url.URL, h
 		return Reply{}, contracts.Fail("UPSTREAM_UNAVAILABLE", "Campus service connection failed")
 	}
 	defer res.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(res.Body, MaxBody+1))
+	// Bounded content fetches only need redirect headers. Do not let a login
+	// or storage redirect body consume the requested object's range budget.
+	if maxBytes < MaxBody && res.StatusCode >= 300 && res.StatusCode < 400 {
+		return Reply{Status: res.StatusCode, Header: res.Header.Clone(), Body: []byte{}}, nil
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(res.Body, int64(maxBytes)+1))
 	if err != nil {
 		return Reply{}, contracts.Fail("UPSTREAM_UNAVAILABLE", "Campus response could not be read")
 	}
-	if len(responseBody) > MaxBody {
-		return Reply{}, contracts.Fail("RESPONSE_TOO_LARGE", "Campus response exceeds 8 MiB")
+	if len(responseBody) > maxBytes {
+		return Reply{}, contracts.Fail("RESPONSE_TOO_LARGE", "Campus response exceeds its byte limit")
 	}
 	return Reply{Status: res.StatusCode, Header: res.Header.Clone(), Body: responseBody}, nil
 }

@@ -28,6 +28,15 @@ type CampusReadRules struct {
 // CampusRules returns values rather than a mutable registry. Unknown/new
 // capabilities are denied until their rules are explicitly reviewed here.
 func CampusRules(id string) (CampusReadRules, bool) {
+	if r, ok := StudentRecordRules(id); ok {
+		return r, true
+	}
+	if r, ok := CollaborationRules(id); ok {
+		return r, true
+	}
+	if r, ok := digitalReadRules(id); ok {
+		return r, true
+	}
 	r := CampusReadRules{capability: id, MaxResources: 8, Paginated: true}
 	switch id {
 	case PanQuotaCapability:
@@ -92,6 +101,9 @@ func CampusCapabilityIDs() []string {
 	for _, op := range []string{"courses", "filters", "hot", "course", "reviews", "review_filters", "review_trend", "teachers", "teacher_filters", "teacher", "teacher_courses", "enrolled", "followed", "ignored"} {
 		ids = append(ids, JCoursePrefix+op)
 	}
+	ids = append(ids, DigitalReadIDs()...)
+	ids = append(ids, StudentRecordCapabilityIDs()...)
+	ids = append(ids, CollaborationCapabilityIDs()...)
 	return ids
 }
 
@@ -115,12 +127,18 @@ func (r CampusReadRules) ValidGrant(view string, limit int, resources []string) 
 
 // ValidQuery checks contract shape only, not whether an application owns it.
 func (r CampusReadRules) ValidQuery(q CampusQuery) bool {
-	return r.ValidViewLimit(q.View, q.Limit) && ValidCampusResource(r.capability, q.ResourceRef) && (r.QueryAllowed || q.Query == "") && (r.Paginated || q.Cursor == "") && (r.capability != ShuiyuanSearchCapability || ValidShuiyuanQuery(q.Query)) && validActivityFilters(r.capability, q) && validUtilityFilters(r.capability, q) && validJCourseFilters(r.capability, q)
+	return r.ValidViewLimit(q.View, q.Limit) && ValidCampusResource(r.capability, q.ResourceRef) && (r.QueryAllowed || q.Query == "") && (r.Paginated || q.Cursor == "") && (r.capability != ShuiyuanSearchCapability || ValidShuiyuanQuery(q.Query)) && validActivityFilters(r.capability, q) && validUtilityFilters(r.capability, q) && validJCourseFilters(r.capability, q) && validDigitalFilters(r.capability, q) && validCollaborationFilters(r.capability, q)
 }
 
 // AllowsInputField rejects unrelated portal fields even when their JSON values
 // are empty. A shared Go query type must not imply shared business parameters.
 func (r CampusReadRules) AllowsInputField(key string) bool {
+	if collaborationField(r.capability, key) {
+		return true
+	}
+	if digitalField(r.capability, key) {
+		return true
+	}
 	switch key {
 	case "account_ref", "resource_ref", "view", "limit", "cursor":
 		return r.capability != ""

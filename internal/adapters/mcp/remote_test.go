@@ -126,7 +126,7 @@ func TestRemoteMixedCatalogMetadataAndDispatch(t *testing.T) {
 		if tool.Title != "查询校园信息" || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("missing title or read-only hint: %+v", tool)
 		}
-		for _, text := range []string{"不支持提交或修改", "教务与学习", "academic", "查作业", "查询截止日期", "deadline", "assignment", "影响：[none]", "可恢复性：not_applicable", "annotations 仅为提示，不授予权限", "写入和可信审批执行流程尚未实现"} {
+		for _, text := range []string{"不支持提交或修改", "教务与学习", "academic", "查作业", "查询截止日期", "deadline", "assignment", "影响：[none]", "可恢复性：not_applicable", "annotations 仅为提示，不授予权限", "可信审批尚未实现"} {
 			if !strings.Contains(tool.Description, text) {
 				t.Fatalf("%s missing discovery metadata %q: %s", tool.Name, text, tool.Description)
 			}

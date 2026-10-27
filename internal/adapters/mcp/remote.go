@@ -90,6 +90,9 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 		}
 		return append([]contracts.Capability(nil), snapshot...), nil
 	})
+	if content, ok := api.(contentAPI); ok {
+		addContentTools(server, content)
+	}
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, r sdk.Request) (sdk.Result, error) {
 			if method == "tools/list" {

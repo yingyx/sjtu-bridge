@@ -61,7 +61,7 @@ func TestTimetableStructureAndScopeFailures(t *testing.T) {
 	if e != nil || rows == nil || account == "" {
 		t.Fatal("valid empty timetable rejected", e)
 	}
-	for _, raw := range []string{endpoint + "&xh=OTHER", "https://i.sjtu.edu.cn/cjcx/cjcx_cxXsKccjList.html?gnmkdm=N305007"} {
+	for _, raw := range []string{endpoint + "&xh=OTHER", componentsQuery + "&xh=OTHER", "https://i.sjtu.edu.cn/cjcx/cjcx_cxXsKccjList.html?gnmkdm=N305005"} {
 		u, _ := url.Parse(raw)
 		if Allowed(u) {
 			t.Fatal("unreviewed endpoint allowed")

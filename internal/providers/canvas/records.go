@@ -377,6 +377,23 @@ func canvasBody(source, course string) (string, []contracts.CanvasLink, bool) {
 						}
 						base, _ := url.Parse("https://" + Host + "/courses/" + strings.TrimPrefix(course, "canvas:course:") + "/")
 						u = base.ResolveReference(u)
+						// Canvas rich content may use global file URLs. Expose
+						// only the ticket-free course navigation reference;
+						// the independent content capability must still prove
+						// actual membership before returning any bytes.
+						if u.Scheme == "https" && u.Host == Host && u.User == nil && u.RawPath == "" {
+							parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+							fileID := ""
+							if len(parts) >= 2 && len(parts) <= 3 && parts[0] == "files" && numeric.MatchString(parts[1]) && (len(parts) == 2 || parts[2] == "download") {
+								fileID = parts[1]
+							}
+							if len(parts) == 4 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "files" && numeric.MatchString(parts[3]) {
+								fileID = parts[3]
+							}
+							if fileID != "" {
+								u.Path = "/courses/" + strings.TrimPrefix(course, "canvas:course:") + "/files/" + fileID
+							}
+						}
 						u.RawQuery = ""
 						u.ForceQuery = false
 						u.Fragment = ""

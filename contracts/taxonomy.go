@@ -10,6 +10,7 @@ var categoryLabels = map[string]string{
 // Selected task groups are implemented first; the full design is documented in
 // docs/service-taxonomy.md. Merely registering a path does not authorize it.
 var taskGroupLabels = map[TaskPath]string{
+	{"learning", "exams"}:          "考试与成绩",
 	{"digital", "software"}:        "软件与生产力工具",
 	{"life", "utilities"}:          "住宿与生活设施",
 	{"life", "convenience"}:        "日常便民服务",

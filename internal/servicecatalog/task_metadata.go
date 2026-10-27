@@ -54,7 +54,7 @@ func completeTaskMetadata(records []record) {
 			e.Title = "第二课堂成长记录"
 			e.Purpose = "查询本人获准的荣誉、实践与教育固定记录；不推断学分认定、课程通过或毕业资格。"
 		case "mail":
-			e.Purpose = "查询本人获准收件箱的邮件标题、发件地址和时间；不读取正文附件或标记已读。"
+			e.Purpose = "查询本人获准邮件标题、文件夹、全文搜索、正文与附件；各能力独立授权，不标记已读。"
 		case "licensed-software":
 			e.Purpose = "查找正版软件中心公开目录与官方获取入口；产品目录不证明个人许可，下载激活由官网处理。"
 		}

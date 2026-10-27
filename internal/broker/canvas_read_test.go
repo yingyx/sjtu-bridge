@@ -1,8 +1,11 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 
 type canvasReaderFake struct {
 	domain.Canvas
+	brokerContentSource
 	read func(string, contracts.CanvasQuery, []string, string) (domain.CanvasPage, error)
 }
 
@@ -41,6 +45,12 @@ func TestCanvasReadFamilyThroughBrokerAndFixedViews(t *testing.T) {
 			ref = "canvas:course:1"
 		}
 		row := contracts.CanvasRecord{CourseRef: "canvas:course:1", Ref: ref, Title: "合成课程项", URL: "https://oc.sjtu.edu.cn/courses/1", Body: &body, Truncated: &truncated, Code: "SYNTHETIC_UNSCOPED_CODE"}
+		if id == "canvas.submissions.feedback" {
+			grade, score := "A", 95.0
+			row.Grade, row.Score = &grade, &score
+			row.Attachments = []contracts.CanvasAttachment{{ID: "11", Name: "synthetic.txt", Size: 3, MIMEType: "text/plain"}}
+			row.Comments = []contracts.CanvasSubmissionComment{{ID: "12", Author: "合成教师", Body: "合成反馈", CreatedAt: "2026-10-25T00:00:00Z"}}
+		}
 		out := domain.CanvasPage{Rows: []contracts.CanvasRecord{row}}
 		if r.List && next == "" {
 			out.Next = "SYNTHETIC_NEXT"
@@ -78,6 +88,9 @@ func TestCanvasReadFamilyThroughBrokerAndFixedViews(t *testing.T) {
 			if r.Module {
 				q.ModuleID = "5"
 			}
+			if id == contracts.CanvasRecordingContent {
+				q.MediaKind, q.Index = "video", 1
+			}
 			if r.Dates {
 				q.StartDate = "2030-01-01"
 				q.EndDate = "2030-01-31"
@@ -87,12 +100,40 @@ func TestCanvasReadFamilyThroughBrokerAndFixedViews(t *testing.T) {
 			if e != nil {
 				t.Fatal("invoke", e)
 			}
+			if id == contracts.CanvasFileContent || id == contracts.CanvasRecordingContent {
+				var d contracts.ContentDescriptor
+				if json.Unmarshal(v, &d) != nil || !d.Valid() {
+					t.Fatal("content descriptor", string(v))
+				}
+				request, _ := json.Marshal(contracts.ContentReadRequest{Ref: d.Ref, Version: d.Version, Offset: 0, Length: 3})
+				req := httptest.NewRequest(http.MethodPost, "/v1/content/read", bytes.NewReader(request))
+				req.Host = "bridge.local"
+				req.Header.Set("Authorization", "Bearer "+h.a)
+				recorder := httptest.NewRecorder()
+				h.b.Handler().ServeHTTP(recorder, req)
+				if recorder.Code != http.StatusOK || !bytes.Equal(recorder.Body.Bytes(), []byte{0, 255, 3}) {
+					t.Fatal("content channel", recorder.Code, recorder.Body.String())
+				}
+				q.CourseRef = "canvas:course:2"
+				raw, _ = json.Marshal(q)
+				if _, e := invoke(contracts.Invocation{Capability: id, Input: raw}); e == nil {
+					t.Fatal("ungranted content course")
+				}
+				return
+			}
 			var out contracts.CanvasResponse
 			if json.Unmarshal(v, &out) != nil || len(out.Data.Items) != 1 {
 				t.Fatal("output")
 			}
-			if !r.Body && strings.Contains(string(v), "合成课程正文") {
+			bodyAllowed := false
+			for _, field := range r.Fields() {
+				bodyAllowed = bodyAllowed || field == "body"
+			}
+			if !bodyAllowed && strings.Contains(string(v), "合成课程正文") {
 				t.Fatal("body leaked from index capability")
+			}
+			if id == "canvas.submissions.feedback" && (out.Data.Items[0].Grade == nil || out.Data.Items[0].Score == nil || len(out.Data.Items[0].Comments) != 1 || len(out.Data.Items[0].Attachments) != 1) {
+				t.Fatal("feedback fields lost")
 			}
 			if r.Kind != "course" && strings.Contains(string(v), "SYNTHETIC_UNSCOPED_CODE") {
 				t.Fatal("unreviewed provider field leaked")

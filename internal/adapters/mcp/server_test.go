@@ -58,8 +58,13 @@ func TestEntrypointParity(t *testing.T) {
 	if len(nativeTools(tools.Tools)) != len(api.Capabilities()) {
 		t.Fatal(tools)
 	}
+	byTool := map[string]contracts.Capability{}
+	for _, c := range api.Capabilities() {
+		byTool[contracts.MCPToolName(c.ID)] = c
+	}
 	for _, tool := range tools.Tools {
-		if strings.Contains(tool.Name, "auth") || !tool.Annotations.ReadOnlyHint {
+		c, exists := byTool[tool.Name]
+		if strings.Contains(tool.Name, "auth") || exists && tool.Annotations.ReadOnlyHint != c.IsReadOnly() {
 			t.Fatal(tool)
 		}
 	}

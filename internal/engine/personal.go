@@ -30,6 +30,7 @@ type active struct {
 
 // Personal runs only inside the Broker. No adapter constructs it with a secret.
 type Personal struct {
+	Content         *ContentStore
 	capability      contracts.Capability // immutable reviewed definition
 	Store           *storage.Store
 	Provider        domain.Canvas
@@ -173,6 +174,12 @@ func Safe(err error) error {
 // Invoke publishes exactly one bounded JSON buffer. Authorization is checked
 // under the same per-object fences used by durable management revocations.
 func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
+	if inv.Capability == contracts.CanvasFileContent || inv.Capability == contracts.CanvasRecordingContent {
+		return p.invokeCanvasContent(ctx, token, inv, send)
+	}
+	if inv.Capability == contracts.PanContentCapability || inv.Capability == contracts.MailAttachmentCapability {
+		return p.invokeDigitalContent(ctx, token, inv, send)
+	}
 	if _, known := contracts.CanvasRules(inv.Capability); known {
 		return p.invokeCanvas(ctx, token, inv, send)
 	}

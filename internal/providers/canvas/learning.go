@@ -37,6 +37,9 @@ func learningAllowed(u *url.URL) bool {
 		return len(q) == 1 && q.Get("include[]") == "syllabus_body"
 	}
 	if learningObjectPath.MatchString(u.Path) {
+		if strings.HasSuffix(u.Path, "/submissions/self") && len(q) == 1 && q.Get("include[]") == "submission_comments" {
+			return true
+		}
 		return len(q) == 0
 	}
 	calendar := u.Path == "/api/v1/calendar_events"
@@ -101,8 +104,11 @@ func learningTarget(id string, q contracts.CanvasQuery) *url.URL {
 		v.Set("include[]", "syllabus_body")
 	case "canvas.assignments.get":
 		path += "/assignments/" + q.ItemID
-	case "canvas.submissions.get":
+	case "canvas.submissions.get", "canvas.submissions.feedback":
 		path += "/assignments/" + q.ItemID + "/submissions/self"
+		if id == "canvas.submissions.feedback" {
+			v.Set("include[]", "submission_comments")
+		}
 	case "canvas.announcements.list":
 		path += "/discussion_topics"
 		v.Set("only_announcements", "true")
@@ -186,6 +192,9 @@ func (s Service) ReadCanvas(ctx context.Context, secret []byte, account, id stri
 			return out, contracts.Fail("PERMISSION_DENIED", "Active student course ownership could not be verified")
 		}
 	}
+	if strings.HasPrefix(id, "canvas.recordings.") {
+		return s.readRecordings(ctx, p, uid, id, q, next)
+	}
 	u := learningTarget(id, q)
 	if id == "canvas.announcements.get" || id == "canvas.discussions.get" {
 		raw, e := p.topic(ctx, u, q.ItemID)
@@ -240,6 +249,9 @@ func (s Service) ReadCanvas(ctx context.Context, secret []byte, account, id stri
 			}
 		}
 		row, include, e := learningRecord(raw, id, q, uid)
+		if e == nil && id == "canvas.submissions.feedback" {
+			e = submissionFeedback(raw, &row)
+		}
 		if e != nil {
 			return out, e
 		}

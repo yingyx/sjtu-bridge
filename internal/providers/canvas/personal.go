@@ -47,7 +47,20 @@ func assignmentQuery(u *url.URL) bool {
 	return q.Get("per_page") != ""
 }
 
-type Service struct{ Client Getter }
+type RecordingClient interface {
+	Getter
+	Post(context.Context, *url.URL, http.Header, []byte) (transport.Reply, error)
+}
+type Service struct {
+	Client          Getter
+	RecordingClient RecordingClient
+	MediaClient     interface {
+		GetBounded(context.Context, *url.URL, http.Header, int) (transport.Reply, error)
+	}
+	FileClient interface {
+		GetBounded(context.Context, *url.URL, http.Header, int) (transport.Reply, error)
+	}
+}
 type budgetGetter struct {
 	inner Getter
 	used  int

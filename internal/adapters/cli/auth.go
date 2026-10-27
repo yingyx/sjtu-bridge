@@ -77,7 +77,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		kind, known := contracts.CredentialKind(provider)
 		if !known {
-			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, jcourse, shuiyuan, teaching, sjtumail, activity, dekt, electric, bath or pan")
+			return contracts.Fail("INVALID_ARGUMENT", "Use --provider canvas, jcourse, shuiyuan, teaching, sjtumail, activity, dekt, electric, bath, pan, mlearning, campuscard, calendar, myportal, meeting or transcribe")
 		}
 		if browserContext && kind != "JAAuthCookie" {
 			return contracts.Fail("INVALID_ARGUMENT", "Browser session context is only for campus JAAuthCookie providers")
@@ -117,7 +117,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 		}
 		return write(v)
 	}}
-	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), jcourse (API Key), shuiyuan (read User API Key), teaching / sjtumail / activity / dekt / electric / bath / pan (JAAuthCookie, independently verified portal account)")
+	importCmd.Flags().StringVar(&provider, "provider", "", "canvas (Token), jcourse (API Key), shuiyuan (read User API Key), teaching / sjtumail / activity / dekt / electric / bath / pan / mlearning / campuscard / calendar / myportal / meeting / transcribe (JAAuthCookie, independently verified portal account)")
 	importCmd.Flags().StringVar(&label, "account", "main", "Local account label (not an authorization key)")
 	importCmd.Flags().BoolVar(&browserContext, "browser-context", false, "Optionally import trusted-device Cookie and original browser User-Agent using hidden terminal input")
 	authCmd.AddCommand(importCmd)
@@ -178,7 +178,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	_ = resources.MarkFlagRequired("credential")
 	authCmd.AddCommand(resources)
 	root.AddCommand(authCmd)
-	apps := &cobra.Command{Use: "apps", GroupID: "management", Short: "创建、轮换和撤销应用连接"}
+	apps := &cobra.Command{Use: "apps", GroupID: "management", Short: "配置应用权限，管理应用连接"}
 	for _, action := range []string{"create", "rotate"} {
 		q := &broker.AdminRequest{}
 		description := "创建应用并交付连接文件"
@@ -338,7 +338,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 			name   string
 			target *string
 		}{
-			{"activity_type_id", &q.ActivityTypeID}, {"date", &q.Date}, {"month", &q.Month}, {"begin", &q.Begin}, {"end", &q.End},
+			{"path", &q.Path}, {"item_id", &q.ItemID}, {"part", &q.Part}, {"mode", &q.Mode}, {"activity_type_id", &q.ActivityTypeID}, {"date", &q.Date}, {"month", &q.Month}, {"begin", &q.Begin}, {"end", &q.End},
 			{"department", &q.Department}, {"language", &q.Language}, {"category", &q.Category}, {"target_year", &q.TargetYear}, {"credit", &q.Credit}, {"has_review", &q.HasReview}, {"order_by", &q.OrderBy}, {"ascend", &q.Ascend}, {"teacher_title", &q.TeacherTitle}, {"semester", &q.Semester}, {"rating", &q.Rating}, {"period", &q.Period},
 		} {
 			if rules.AllowsInputField(field.name) {
@@ -358,6 +358,10 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 				list.Flags().StringSliceVar(field.target, flag, nil, "")
 				businessFlags = append(businessFlags, flag)
 			}
+		}
+		if rules.AllowsInputField("unread") {
+			list.Flags().BoolVar(&q.Unread, "unread", false, "")
+			businessFlags = append(businessFlags, "unread")
 		}
 		applySchemaFlagHelp(list, schema)
 		jsonInput = addJSONInputFlags(list)

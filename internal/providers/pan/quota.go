@@ -23,6 +23,9 @@ func (s *Service) Identity(ctx context.Context, secret []byte) (string, error) {
 }
 
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
+	if q.View == "files_v1" || q.View == "file_v1" {
+		return s.readFiles(ctx, secret, account, q, next)
+	}
 	if e := contracts.ValidatePanQuery(q); e != nil {
 		return domain.CampusPage{}, e
 	}

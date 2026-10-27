@@ -367,7 +367,7 @@ func TestInputsDeniedBeforeNetworkAndCancellation(t *testing.T) {
 }
 
 func TestAllowedExactEndpoints(t *testing.T) {
-	for _, raw := range []string{root + "/user/v1/space/1/personal?user_token=" + syntheticToken, root + "/user/v1/space/2?user_token=" + syntheticToken, root + "/user/v1/organization/1?user_token=" + syntheticToken, root + "/user/v1/user/1/42?user_token=" + syntheticToken, root + "/user/v1/space/1?user_token=" + syntheticToken + "&user_token=other", root + "/user/v1/space/1?user_token=" + syntheticToken + "#fragment", "http://" + Host + "/user/v1/space/1?user_token=" + syntheticToken} {
+	for _, raw := range []string{root + "/user/v1/space/2?user_token=" + syntheticToken, root + "/user/v1/organization/1?user_token=" + syntheticToken, root + "/user/v1/user/1/42?user_token=" + syntheticToken, root + "/user/v1/space/1?user_token=" + syntheticToken + "&user_token=other", root + "/user/v1/space/1?user_token=" + syntheticToken + "#fragment", "http://" + Host + "/user/v1/space/1?user_token=" + syntheticToken} {
 		u, _ := url.Parse(raw)
 		if Allowed(u) {
 			t.Fatalf("Unreviewed data endpoint accepted: %s", u.Path)

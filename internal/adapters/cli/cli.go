@@ -121,6 +121,7 @@ func New(out, diagnostics io.Writer, input io.Reader) *cobra.Command {
 	})})
 	root.AddCommand(mcpCommand)
 	addPrivate(root, out, diagnostics, input, &connection, &jsonOutput, &verbose)
+	addContent(root, out, diagnostics, &connection, &jsonOutput, &verbose)
 	root.SetHelpCommand(&cobra.Command{Use: "help [command]", GroupID: "runtime", Short: "查看指定命令的帮助", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		target, remaining, err := root.Find(args)
 		if target == nil {

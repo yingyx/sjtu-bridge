@@ -71,6 +71,16 @@ func addCanvasCommands(root *cobra.Command, connection *string, input io.Reader,
 			flags = append(flags, "start-date", "end-date")
 			command.Example += " --start-date YYYY-MM-DD --end-date YYYY-MM-DD"
 		}
+
+		if id == contracts.CanvasFileContent {
+			command.Flags().StringVar(&q.AssignmentID, "assignment-id", "", "")
+			flags = append(flags, "assignment-id")
+		}
+		if id == contracts.CanvasRecordingContent {
+			command.Flags().StringVar(&q.MediaKind, "media-kind", "", "")
+			command.Flags().IntVar(&q.Index, "index", 0, "")
+			flags = append(flags, "media-kind", "index")
+		}
 		applySchemaFlagHelp(command, schema)
 		options = addJSONInputFlags(command)
 		group.AddCommand(command)

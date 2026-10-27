@@ -66,6 +66,9 @@ func encode(c continuation) string {
 func hash(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
 
 func (s *Service) Read(ctx context.Context, secret []byte, account string, q contracts.CampusQuery, next string) (domain.CampusPage, error) {
+	if q.View != "search_v1" {
+		return s.readForum(ctx, secret, account, q, next)
+	}
 	fail := func(code, message string) (domain.CampusPage, error) {
 		return domain.CampusPage{}, contracts.Fail(code, message)
 	}

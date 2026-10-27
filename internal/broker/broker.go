@@ -23,14 +23,20 @@ import (
 	"github.com/yingyx/sjtu-bridge/internal/local"
 	"github.com/yingyx/sjtu-bridge/internal/providers/activity"
 	"github.com/yingyx/sjtu-bridge/internal/providers/bath"
+	"github.com/yingyx/sjtu-bridge/internal/providers/calendar"
+	"github.com/yingyx/sjtu-bridge/internal/providers/campuscard"
 	"github.com/yingyx/sjtu-bridge/internal/providers/canvas"
 	"github.com/yingyx/sjtu-bridge/internal/providers/dekt"
 	"github.com/yingyx/sjtu-bridge/internal/providers/electric"
 	"github.com/yingyx/sjtu-bridge/internal/providers/jcourse"
+	"github.com/yingyx/sjtu-bridge/internal/providers/meeting"
+	"github.com/yingyx/sjtu-bridge/internal/providers/mlearning"
+	"github.com/yingyx/sjtu-bridge/internal/providers/myportal"
 	"github.com/yingyx/sjtu-bridge/internal/providers/pan"
 	"github.com/yingyx/sjtu-bridge/internal/providers/shuiyuan"
 	"github.com/yingyx/sjtu-bridge/internal/providers/sjtumail"
 	"github.com/yingyx/sjtu-bridge/internal/providers/teaching"
+	"github.com/yingyx/sjtu-bridge/internal/providers/transcribe"
 	"github.com/yingyx/sjtu-bridge/internal/storage"
 	"github.com/yingyx/sjtu-bridge/internal/transport"
 )
@@ -39,6 +45,7 @@ type Broker struct {
 	adminMu     sync.Mutex
 	Store       *storage.Store
 	Engine      *engine.Personal
+	Content     *engine.ContentStore
 	Owner       string
 	Endpoint    string
 	public      publicAPI
@@ -54,12 +61,18 @@ type publicAPI interface {
 
 func New(s *storage.Store, p domain.Canvas, a engine.Auditor, owner, endpoint string) *Broker {
 	public, close, err := app.New("public")
-	return &Broker{Store: s, Engine: engine.NewPersonal(s, p, a), Owner: owner, Endpoint: endpoint, public: public, publicErr: err, publicClose: close}
+	personal := engine.NewPersonal(s, p, a)
+	content := engine.NewContentStore(personal)
+	personal.Content = content
+	return &Broker{Store: s, Engine: personal, Content: content, Owner: owner, Endpoint: endpoint, public: public, publicErr: err, publicClose: close}
 }
 
 // Close releases the shared public transport. Store ownership stays with the caller.
 func (b *Broker) Close() {
 	b.closeOnce.Do(func() {
+		if b.Content != nil {
+			b.Content.Close()
+		}
 		if b.publicClose != nil {
 			b.publicClose()
 		}
@@ -119,7 +132,9 @@ func Run(ctx context.Context) error {
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	defer stopMaintenance()
 	go audit.Maintain(maintenanceCtx)
-	b := New(s, canvas.Service{Client: upstream}, audit, owner, endpoint)
+	recordings := transport.NewSecure(canvas.RecordingHost, canvas.RecordingAllowed)
+	defer recordings.Close()
+	b := New(s, canvas.Service{Client: upstream, RecordingClient: recordings}, audit, owner, endpoint)
 	teachingService, closeTeaching := teaching.New()
 	defer closeTeaching()
 	mailService, closeMail := sjtumail.New()
@@ -138,7 +153,19 @@ func Run(ctx context.Context) error {
 	defer closePan()
 	forumService, closeForum := shuiyuan.New()
 	defer closeForum()
-	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "dekt": dektService, "electric": electricService, "bath": bathService, "jcourse": jcourseService, "pan": panService, "shuiyuan": forumService}
+	ml, closeML := mlearning.New()
+	defer closeML()
+	card, closeCard := campuscard.New()
+	defer closeCard()
+	cal, closeCal := calendar.New()
+	defer closeCal()
+	my, closeMy := myportal.New()
+	defer closeMy()
+	meet, closeMeet := meeting.New()
+	defer closeMeet()
+	ai, closeAI := transcribe.New()
+	defer closeAI()
+	b.Engine.CampusProviders = map[string]domain.Campus{"teaching": teachingService, "sjtumail": mailService, "activity": activityService, "dekt": dektService, "electric": electricService, "bath": bathService, "jcourse": jcourseService, "pan": panService, "shuiyuan": forumService, "mlearning": ml, "campuscard": card, "calendar": cal, "myportal": my, "meeting": meet, "transcribe": ai}
 	return b.Serve(ctx, l)
 }
 func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
@@ -168,6 +195,7 @@ func (b *Broker) Serve(ctx context.Context, l net.Listener) error {
 }
 func (b *Broker) Handler() http.Handler {
 	mux := http.NewServeMux()
+	b.registerContent(mux)
 	mux.HandleFunc("/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			writeError(w, contracts.Fail("PERMISSION_DENIED", "Method denied"))
