@@ -38,7 +38,7 @@ const (
 
 // ExecutionRule is a reviewed minimum requirement, not caller authorization.
 // Confirm, manual and disabled are descriptive only: the MVP cannot execute
-// them and has no business approval or write workflow.
+// them and has no trusted business approval workflow.
 type ExecutionRule string
 
 const (

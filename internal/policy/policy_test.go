@@ -6,6 +6,33 @@ import (
 	"github.com/yingyx/sjtu-bridge/contracts"
 )
 
+func TestWriteCeilingAdmitsOnlyReviewedPrivateCreations(t *testing.T) {
+	for _, id := range contracts.PanWriteIDs() {
+		original, ok := contracts.PersonalMetadata(id)
+		if !ok || !ExecutableWrite(original) || ExecutableRead(original) || PersonalAllowed(original) || Allowed("public", original, "") {
+			t.Fatal("write execution ceiling is not independent", id)
+		}
+		for _, mutate := range []func(*contracts.Capability){
+			func(c *contracts.Capability) { c.ID = "digital.meetings.create" },
+			func(c *contracts.Capability) { c.ID = "digital.ai.transcriptions.upload" },
+			func(c *contracts.Capability) { c.ContractVersion = "2" },
+			func(c *contracts.Capability) { c.Provider = "meeting" },
+			func(c *contracts.Capability) { c.ExecutionRule = contracts.ConfirmExecution },
+			func(c *contracts.Capability) { c.DataClass = contracts.PublicData },
+			func(c *contracts.Capability) { c.Effects = []contracts.Effect{contracts.DestructiveEffect} },
+			func(c *contracts.Capability) { c.Effects = []contracts.Effect{contracts.ResourceCommitmentEffect} },
+			func(c *contracts.Capability) { c.Credentials = []string{"CanvasToken"} },
+		} {
+			c := contracts.CloneCapability(original)
+			c.Authorized = true
+			mutate(&c)
+			if Executable(c) {
+				t.Fatal("metadata opted an unreviewed write into execution", id)
+			}
+		}
+	}
+}
+
 func TestReviewedCatalogExecutionCeiling(t *testing.T) {
 	public := contracts.PublicCapabilities()
 	domains := map[string]bool{}

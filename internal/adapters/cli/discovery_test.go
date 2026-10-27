@@ -47,7 +47,7 @@ func TestUnconnectedTaskDiscoveryAndDetails(t *testing.T) {
 		args []string
 		ids  []string
 	}{
-		{[]string{"search", "云盘"}, []string{contracts.PanContentCapability, contracts.PanInfoCapability, contracts.PanFilesCapability, contracts.PanQuotaCapability}},
+		{[]string{"search", "云盘"}, []string{contracts.PanMkdirCapability, contracts.PanContentCapability, contracts.PanInfoCapability, contracts.PanFilesCapability, contracts.PanUploadCapability, contracts.PanQuotaCapability}},
 		{[]string{"search", "水源"}, []string{contracts.ShuiyuanNotificationsCapability, contracts.ShuiyuanPostsCapability, contracts.ShuiyuanSearchCapability, contracts.ShuiyuanTopicCapability, contracts.ShuiyuanTopicsCapability}},
 		{[]string{"search", "教务 通知"}, []string{"public.notices.list", "public.notices.search"}},
 		{[]string{"list", "--category", "learning", "--service", "教务处"}, []string{"public.calendars.list", "public.notices.list", "public.notices.search"}},

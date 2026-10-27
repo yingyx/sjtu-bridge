@@ -14,6 +14,7 @@ import (
 
 type AuditEvent struct {
 	Time            time.Time `json:"time"`
+	IntentHash      string    `json:"intent_hash,omitempty"`
 	RequestID       string    `json:"request_id,omitempty"`
 	ClientID        string    `json:"client_id,omitempty"`
 	GrantID         string    `json:"grant_id,omitempty"`

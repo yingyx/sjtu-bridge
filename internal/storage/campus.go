@@ -106,6 +106,6 @@ func validGrant(g Grant) bool {
 	if g.Capability == contracts.AssignmentsCapability {
 		return (g.View == "summary_v1" || g.View == "deadlines_v1") && len(g.Courses) > 0 && len(g.Resources) == 0
 	}
-	rules, known := contracts.CampusRules(g.Capability)
+	rules, known := contracts.GrantRules(g.Capability)
 	return known && len(g.Courses) == 0 && rules.ValidGrant(g.View, g.Limit, g.Resources)
 }

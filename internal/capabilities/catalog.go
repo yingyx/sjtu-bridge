@@ -19,12 +19,15 @@ func Catalog(public []contracts.Capability) []contracts.Capability {
 	}
 	ids := append(contracts.CampusCapabilityIDs(), contracts.CanvasCapabilityIDs()...)
 	ids = append(ids, contracts.AssignmentsCapability)
+	ids = append(ids, contracts.PanWriteIDs()...)
 	for _, id := range ids {
 		c, ok := contracts.PersonalMetadata(id)
-		if !ok || !policy.ExecutableRead(c) {
+		if !ok || !policy.Executable(c) {
 			continue
 		}
 		switch {
+		case contracts.IsPanWrite(id):
+			c.InputSchema = contracts.PanWriteInputSchema(id)
 		case id == contracts.AssignmentsCapability:
 			c.InputSchema = contracts.AssignmentInputSchema()
 		case c.Provider == "canvas":

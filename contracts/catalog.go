@@ -434,6 +434,7 @@ func utilityMetadata(id, title, provider string, aliases []string, description s
 // Keep production registration explicit and separate from provider research.
 func init() {
 	catalog = append(catalog, digitalMetadata()...)
+	catalog = append(catalog, panWriteMetadata()...)
 	catalog = append(catalog, StudentRecordMetadata()...)
 	catalog = append(catalog, CollaborationMetadata()...)
 }

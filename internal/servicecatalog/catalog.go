@@ -271,7 +271,7 @@ func capabilityTasks() map[string][]string {
 	add("career-opportunities", contracts.CareerListCapability)
 	add("campus-news", contracts.CampusNewsCapability)
 	add("campus-ai", contracts.AIStatusCapability, contracts.AIUsageCapability)
-	add("cloud-storage", contracts.PanQuotaCapability, contracts.PanFilesCapability, contracts.PanInfoCapability, contracts.PanContentCapability)
+	add("cloud-storage", contracts.PanQuotaCapability, contracts.PanFilesCapability, contracts.PanInfoCapability, contracts.PanContentCapability, contracts.PanMkdirCapability, contracts.PanUploadCapability)
 	add("shuiyuan-community", contracts.ShuiyuanSearchCapability, contracts.ShuiyuanTopicsCapability, contracts.ShuiyuanTopicCapability, contracts.ShuiyuanPostsCapability, contracts.ShuiyuanNotificationsCapability)
 	add("academic-results", contracts.GradesCapability, contracts.GradesComponentsCapability, contracts.ExamsCapability)
 	add("class-attendance", contracts.AttendanceRecordsCapability, contracts.AttendanceStatusCapability)

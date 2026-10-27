@@ -287,6 +287,7 @@ func addPrivate(root *cobra.Command, out, diag io.Writer, input io.Reader, conne
 	assignmentInput = addJSONInputFlags(list)
 	assignments.AddCommand(list)
 	addCanvasCommands(root, connection, input, write)
+	addPanWriteCommands(root, connection, input, write)
 	for _, id := range contracts.CampusCapabilityIDs() {
 		metadata, _ := contracts.PersonalMetadata(id)
 		rules, _ := contracts.CampusRules(id)

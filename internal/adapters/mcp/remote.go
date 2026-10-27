@@ -47,7 +47,7 @@ func NewRemote(ctx context.Context, api RemoteAPI) (*sdk.Server, error) {
 		}
 		clear()
 		for _, c := range caps {
-			if !c.Authorized || !policy.ExecutableRead(c) {
+			if !c.Authorized || !policy.Executable(c) {
 				continue
 			}
 			tool := capabilityTool(c)

@@ -65,6 +65,9 @@ var semesterRef = regexp.MustCompile(`^teaching:term:20[0-9]{2}:[12]$`)
 var electricRoomRef = regexp.MustCompile(`^electric:room:[1-9][0-9]{0,17}$`)
 
 func ValidCampusResource(id, ref string) bool {
+	if IsPanWrite(id) {
+		return validPanDirectoryResource(ref)
+	}
 	if IsStudentRecordCapability(id) {
 		return ValidStudentRecordResource(id, ref)
 	}

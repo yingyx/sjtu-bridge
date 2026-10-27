@@ -314,7 +314,7 @@ func (b *Broker) invoke(ctx context.Context, token string, inv contracts.Invocat
 		return err
 	}
 	_, canvasRead := contracts.CanvasRules(inv.Capability)
-	if _, campus := contracts.CampusRules(inv.Capability); campus || inv.Capability == contracts.AssignmentsCapability || canvasRead {
+	if _, campus := contracts.CampusRules(inv.Capability); campus || contracts.IsPanWrite(inv.Capability) || inv.Capability == contracts.AssignmentsCapability || canvasRead {
 		return b.Engine.Invoke(ctx, token, inv, send)
 	}
 	if b.publicErr != nil {

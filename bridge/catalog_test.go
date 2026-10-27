@@ -21,6 +21,7 @@ func TestUnconnectedCatalogDescribesAllImplementedContractsWithoutAuthority(t *t
 	}
 	ids := append(contracts.CampusCapabilityIDs(), contracts.CanvasCapabilityIDs()...)
 	ids = append(ids, contracts.AssignmentsCapability)
+	ids = append(ids, contracts.PanWriteIDs()...)
 	for _, id := range ids {
 		expected[id] = true
 	}

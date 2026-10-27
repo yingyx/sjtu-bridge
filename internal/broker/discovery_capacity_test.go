@@ -16,7 +16,7 @@ import (
 
 func largestCampusResources(t *testing.T, id string) []string {
 	t.Helper()
-	rules, _ := contracts.CampusRules(id)
+	rules, _ := contracts.GrantRules(id)
 	var schema struct {
 		Properties map[string]struct {
 			Enum  []string `json:"enum"`
@@ -24,6 +24,9 @@ func largestCampusResources(t *testing.T, id string) []string {
 		} `json:"properties"`
 	}
 	rawSchema := contracts.CampusInputSchema(id)
+	if contracts.IsPanWrite(id) {
+		rawSchema = contracts.PanWriteInputSchema(id)
+	}
 	if json.Unmarshal(rawSchema, &schema) != nil {
 		t.Fatal("invalid campus schema")
 	}
@@ -36,6 +39,8 @@ func largestCampusResources(t *testing.T, id string) []string {
 	resources := make([]string, rules.MaxResources)
 	for i := range resources {
 		switch {
+		case contracts.IsPanWrite(id):
+			resources[i] = "pan:directory:" + strings.Repeat("x", 110) + fmt.Sprint(i)
 		case id == contracts.TimetableCapability || id == contracts.GradesCapability || id == contracts.ExamsCapability:
 			resources[i] = fmt.Sprintf("teaching:term:%d:%d", 2099-i/2, i%2+1)
 		case id == contracts.ElectricityBalanceCapability || id == contracts.ElectricityHistoryCapability:
@@ -85,6 +90,7 @@ func TestDiscoveryCapacityCoversAllCurrentPersonalCapabilities(t *testing.T) {
 	}
 	ids := append([]string{contracts.AssignmentsCapability}, contracts.CanvasCapabilityIDs()...)
 	ids = append(ids, contracts.CampusCapabilityIDs()...)
+	ids = append(ids, contracts.PanWriteIDs()...)
 	for _, id := range ids {
 		metadata, known := contracts.PersonalMetadata(id)
 		if !known {
@@ -108,7 +114,7 @@ func TestDiscoveryCapacityCoversAllCurrentPersonalCapabilities(t *testing.T) {
 		} else if rules, known := contracts.CanvasRules(id); known {
 			grant.Courses, grant.View, grant.Limit = courses, rules.View, 100
 		} else {
-			rules, _ := contracts.CampusRules(id)
+			rules, _ := contracts.GrantRules(id)
 			grant.Resources, grant.View, grant.Limit = largestCampusResources(t, id), rules.View, rules.MaxLimit
 		}
 		grants[grant.ID] = grant

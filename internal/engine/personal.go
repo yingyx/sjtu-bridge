@@ -125,6 +125,12 @@ func (p *Personal) Discover(token string, send func([]contracts.Capability) erro
 					}
 					continue
 				}
+				if contracts.IsPanWrite(g.Capability) {
+					if c, ok := contracts.PanWriteCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit); ok && policy.ExecutableWrite(c) && p.CampusProviders[c.Provider] != nil {
+						caps = append(caps, c)
+					}
+					continue
+				}
 				c, ok := contracts.CampusCapability(g.Capability, g.AccountRef, g.Resources, g.View, g.Limit)
 				if ok && policy.PersonalAllowed(c) && p.CampusProviders[c.Provider] != nil {
 					caps = append(caps, c)
@@ -174,6 +180,9 @@ func Safe(err error) error {
 // Invoke publishes exactly one bounded JSON buffer. Authorization is checked
 // under the same per-object fences used by durable management revocations.
 func (p *Personal) Invoke(ctx context.Context, token string, inv contracts.Invocation, send func([]byte) error) (err error) {
+	if contracts.IsPanWrite(inv.Capability) {
+		return p.invokePanWrite(ctx, token, inv, send)
+	}
 	if inv.Capability == contracts.CanvasFileContent || inv.Capability == contracts.CanvasRecordingContent {
 		return p.invokeCanvasContent(ctx, token, inv, send)
 	}

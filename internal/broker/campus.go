@@ -12,7 +12,7 @@ import (
 
 func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.State) (any, error) {
 	metadata, ok := contracts.PersonalMetadata(q.Capability)
-	if !ok || !policy.PersonalAllowed(metadata) || b.Engine.CampusProviders[metadata.Provider] == nil {
+	if !ok || !(policy.PersonalAllowed(metadata) || policy.ExecutableWrite(metadata)) || b.Engine.CampusProviders[metadata.Provider] == nil {
 		return nil, contracts.Fail("PERMISSION_DENIED", "Campus capability is not available")
 	}
 	app, credential := s.Apps[q.ClientID], s.Credentials[q.CredentialID]
@@ -22,7 +22,7 @@ func (b *Broker) grantCampus(ctx context.Context, q AdminRequest, s storage.Stat
 	if e := b.Store.CheckCredential(credential); e != nil {
 		return nil, e
 	}
-	rules, known := contracts.CampusRules(q.Capability)
+	rules, known := contracts.GrantRules(q.Capability)
 	if !known || len(q.Courses) != 0 || !rules.ValidGrant(q.View, q.Limit, q.Resources) {
 		return nil, contracts.Fail("INVALID_ARGUMENT", "Choose explicit resources, a fixed view, and bounded limit")
 	}

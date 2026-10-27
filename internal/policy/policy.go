@@ -83,3 +83,11 @@ func Allowed(profile string, c contracts.Capability, account string) bool {
 func PersonalAllowed(c contracts.Capability) bool {
 	return c.DataClass == contracts.PersonalData && ExecutableRead(c)
 }
+
+// ExecutableWrite admits only reviewed non-overwriting private Pan creations.
+// No confirm_each, destructive, resource-commitment or communication write is
+// enabled by this ceiling, including when a caller holds a valid app grant.
+func ExecutableWrite(c contracts.Capability) bool {
+	return contracts.IsPanWrite(c.ID) && c.ContractVersion == "1" && c.Provider == "pan" && c.DataClass == contracts.PersonalData && c.Operation == contracts.Write && c.ExecutionRule == contracts.GrantExecution && c.Delivery == contracts.QueryDelivery && c.Reversibility == contracts.Reversible && len(c.Effects) == 1 && c.Effects[0] == contracts.NoEffect && len(c.Credentials) == 1 && c.Credentials[0] == "JAAuthCookie"
+}
+func Executable(c contracts.Capability) bool { return ExecutableRead(c) || ExecutableWrite(c) }

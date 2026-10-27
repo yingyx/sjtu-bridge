@@ -21,7 +21,7 @@ type API interface {
 func New(api API) *sdk.Server {
 	server := sdk.NewServer(&sdk.Implementation{Name: "sjtu-bridge", Version: "0.3.0"}, nil)
 	for _, capability := range api.Capabilities() {
-		if !policy.ExecutableRead(capability) {
+		if !policy.Executable(capability) {
 			continue
 		}
 		server.AddTool(capabilityTool(capability), func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
