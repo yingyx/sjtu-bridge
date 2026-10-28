@@ -17,7 +17,10 @@ import (
 )
 
 func TestEightDomainsNavigationAcrossEntrypoints(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// All eight domains, CLI reconstructions and MCP calls share this test
+	// budget. It must allow race instrumentation without changing production
+	// per-request deadlines or skipping any navigation assertions.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	api, err := bridge.New(bridge.Options{})
 	if err != nil {

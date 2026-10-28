@@ -51,7 +51,9 @@ func decodeServiceResult(t *testing.T, result *sdk.CallToolResult, target any) [
 }
 
 func TestServiceToolsMatchCLIBoundedPublicCatalog(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// The entire catalog/CLI/MCP comparison shares this test budget; individual
+	// production requests still enforce their own deadlines.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	api, err := bridge.New(bridge.Options{})
 	if err != nil {

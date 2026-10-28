@@ -49,7 +49,10 @@ func TestBrokerSDKCLIMCPParity(t *testing.T) {
 		t.Skip("fixed endpoint occupied; never displace a running Broker")
 	}
 	b := broker.New(store, &testkit.Canvas{}, &storage.Audit{Path: filepath.Join(d, "audit.jsonl")}, local.Random(), endpoint)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// This deadline covers the whole multi-entrypoint workflow, including many
+	// CLI constructions under race instrumentation, not one business request.
+	// Production per-request deadlines remain enforced by the Broker/Engine.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- b.Serve(ctx, l) }()

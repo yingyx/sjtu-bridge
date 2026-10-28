@@ -17,7 +17,9 @@ import (
 )
 
 func TestEntrypointParity(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// This is the budget for the complete API/CLI/MCP workflow, including
+	// repeated schema construction under race instrumentation.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	api, err := bridge.New(bridge.Options{})
 	if err != nil {
